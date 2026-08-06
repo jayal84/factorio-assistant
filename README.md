@@ -33,7 +33,13 @@ Planned features also include adding external Factorio tools to the add-on, such
 
 ## Install
 
-Install it from the Home Assistant add-on store, configure MQTT and the server options, then open **Factorio Assistant** from the add-on panel. Factorio account credentials are only needed when authenticated Mod Portal downloads are enabled.
+Add this repository to the Home Assistant app repository list:
+
+```text
+https://github.com/jayal84/factorio-assistant
+```
+
+Install **Factorio Assistant**, configure MQTT and the server options, then open it from the app panel. Factorio account credentials are only needed when authenticated Mod Portal downloads are enabled.
 
 ## Documentation
 
