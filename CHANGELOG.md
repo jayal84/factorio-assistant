@@ -17,7 +17,16 @@ All notable changes to **Factorio Assistant** will be documented here.
 
 Planned external tool integrations include Mapshot and Factoriopedia.
 
-## Unreleased
+## 0.1.8 - 2026-08-06
 
-- Added per-save runtime settings for combinator telemetry, scan cadence, wire selection, signal limits, event telemetry, world snapshots, and inventory details.
-- Combinator telemetry is disabled by default as a safety control while custom combinator compatibility is being validated.
+- Added per-save runtime-global settings for combinator telemetry, scan cadence, wire selection, signal limits, event telemetry, world snapshots, and inventory details.
+- Added a blue Factorio Assistant Sender based on Factorio 2.0.77 arithmetic-combinator behavior, preserving native input, arithmetic, and output wiring.
+- Added circuit-network telemetry for red and green Sender input connectors, including signal type, quality, count, position, surface, and placement metadata.
+- Added native-description-based Home Assistant device naming as `Factorio Assistant Sender: <description>` with a unit-number fallback.
+- Added retained MQTT discovery, state, attributes, and availability handling for Sender entities, including cleanup when a Sender is mined, destroyed, or killed.
+- Removed the misleading `signals` unit of measurement from Sender sensors.
+- Added bounded JSONL telemetry rotation at approximately 5 MiB with one archive.
+- Added Factorio 2.0.77 compatibility fixes for circuit connector APIs, property-page stability, entity metadata, and mod packaging.
+- Preserved isolated Home Assistant ingress and external REST listeners on separate ports.
+- Added localized Sender labels, descriptions, technology, recipe, and item metadata.
+- Added release packaging and pinned Factorio reference data for reproducible add-on builds.
