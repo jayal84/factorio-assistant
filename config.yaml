@@ -1,0 +1,49 @@
+name: "Factorio Assistant"
+description: "Factorio Space Age server assistant for Home Assistant with MQTT telemetry, RCON controls, and automated mod updates."
+version: "0.1.8"
+slug: "factorio_assistant"
+arch:
+  - amd64
+host_network: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:factory
+panel_title: Factorio Assistant
+apparmor: true
+map:
+  - share:rw
+  - addon_config:rw
+options:
+  log_level: "info"
+  refresh_rate_profile: "medium"
+  save_name: "world.zip"
+  server_port: 34197
+  rcon_port: 27015
+  rest_api_port: 8098
+  api_token: ""
+  factorio_user: ""
+  factorio_token: ""
+  enable_mod_updates: false
+  enable_telemetry_mod: false
+  mqtt_prefix: "homeassistant"
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_password: ""
+schema:
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)?"
+  refresh_rate_profile: "list(slow|medium|fast|high|debug)?"
+  save_name: "str"
+  server_port: "port"
+  rcon_port: "port"
+  rest_api_port: "port"
+  api_token: "password?"
+  factorio_user: "str?"
+  factorio_token: "password?"
+  enable_mod_updates: "bool"
+  enable_telemetry_mod: "bool"
+  mqtt_prefix: "str"
+  mqtt_host: "str?"
+  mqtt_port: "port?"
+  mqtt_user: "str?"
+  mqtt_password: "password?"
