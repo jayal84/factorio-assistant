@@ -36,7 +36,7 @@ overwritten.
 | `refresh_rate_profile` | `medium` | Telemetry polling profile: slow, medium, fast, high, or debug |
 | `save_name` | `world.zip` | Save filename in `/share/factorio/saves`; created from the map settings only when it does not exist |
 | `enable_mod_updates` | `false` | Check the Mod Portal for updates when enabled |
-| `enable_telemetry_mod` | `false` | Enable the bundled Factorio Assistant mod for structured events, snapshots, and validated commands; the versioned archive is installed in `/share/factorio/mods/factorio_assistant_<version>.zip` |
+| `enable_telemetry_mod` | `true` | Enable the bundled Factorio Assistant mod for structured events, snapshots, and validated commands; the versioned archive is installed in `/share/factorio/mods/factorio_assistant_<version>.zip` |
 | `server_port` | `34197` | Factorio game traffic port; change it if the host port is already in use |
 | `rcon_port` | `27015` | Factorio RCON port used by the bridge and web controls; change it if the host port is already in use |
 | `rest_api_port` | `8100` | Authenticated REST API port; change it if the host port is already in use |

@@ -1,6 +1,30 @@
 const byId = (id) => document.getElementById(id);
+const setText = (id, value) => { const element = byId(id); if (element) element.textContent = value; };
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+const formatBytes = (value) => { const bytes = Number(value || 0); if (!bytes) return '—'; const units = ['B', 'KB', 'MB', 'GB']; const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`; };
+const formatGameTime = (value) => { const seconds = Math.max(0, Number(value || 0)); if (!seconds) return '—'; const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); return `${hours}h ${minutes}m`; };
 const apiUrl = (path) => new URL(`./${path.replace(/^\//, '')}`, document.baseURI).toString();
+function renderResourceMonitor(world) {
+  const target = byId('resource-monitor-results');
+  if (!target) return;
+  const surfaces = Array.isArray(world?.surfaces) ? world.surfaces : [];
+  const sites = surfaces.flatMap((surface) => (Array.isArray(surface.pinned_resources) ? surface.pinned_resources : []).map((site) => ({ ...site, surface: surface.name })));
+  if (!sites.length) {
+    target.innerHTML = '<p class="muted">No pinned resource sites are currently available.</p>';
+    return;
+  }
+  target.innerHTML = sites.map((site) => {
+    const amount = Number(site.amount || 0).toLocaleString();
+    const percentValue = Math.max(0, Math.min(100, Number(site.percent || 0) * 100));
+    const percent = `${percentValue.toFixed(1)}%`;
+    const rate = `${Number(site.rate || 0).toLocaleString()}/s`;
+    const depletion = site.estimated_depletion == null ? 'No estimate' : formatGameTime(Number(site.estimated_depletion) / 60);
+    const position = site.position || {};
+    const friendlyType = site.type_name || 'Resource';
+    const siteName = site.name || `${friendlyType} site`;
+    return `<article class="status-card resource-monitor-card"><div class="section-heading"><div><span class="status-label">${escapeHtml(site.surface || 'Unknown surface')}</span><h3>${escapeHtml(siteName)}</h3></div><span class="panel-tag">${escapeHtml(friendlyType)}</span></div><div class="resource-monitor-progress" role="progressbar" aria-label="Ore remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentValue.toFixed(1)}"><div class="resource-monitor-progress-track"><span style="width:${percentValue.toFixed(1)}%"></span></div><strong>${escapeHtml(percent)} remaining</strong></div><dl class="resource-monitor-list"><div><dt>Amount</dt><dd>${escapeHtml(amount)}</dd></div><div><dt>Rate</dt><dd>${escapeHtml(rate)}</dd></div><div><dt>Depletion</dt><dd>${escapeHtml(depletion)}</dd></div><div><dt>Location</dt><dd>${escapeHtml(site.surface || 'Unknown')} (${escapeHtml(position.x ?? 0)}, ${escapeHtml(position.y ?? 0)})</dd></div></dl></article>`;
+  }).join('');
+}
 let catalogOffset = 0;
 let catalogTotal = 0;
 let catalogResults = [];
@@ -16,8 +40,10 @@ let exploreOffset = 0;
 let exploreResults = [];
 let masterCatalogKind = 'item';
 let technologyEntries = [];
+let saveFileFilter = 'all';
 let researchState = { available: false, researched: [], current: '', progress: 0, queue: [] };
 let monitoredTechnologies = new Set(JSON.parse(localStorage.getItem('factorio-monitored-technologies') || '[]'));
+let lastWorldMetrics = { players: null, gameTime: null };
 function renderResearchSummary() {
   const currentEntry = technologyEntries.find((entry) => entry.name === researchState.current);
   const summary = byId('research-summary');
@@ -371,52 +397,109 @@ async function refreshTechnologies() {
 async function refreshStatus() {
   try {
     const response = await fetch(apiUrl('api/status'), { cache: 'no-store' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-    byId('server-name').textContent = data.factorio.name || 'Factory reference';
-    byId('header-status')?.replaceChildren(document.createTextNode(data.factorio.running ? 'ONLINE' : 'OFFLINE'));
-    byId('header-status-dot')?.classList.toggle('online', Boolean(data.factorio.running));
-    byId('header-status-dot')?.classList.toggle('offline', !data.factorio.running);
-    byId('overview-factorio-state') && (byId('overview-factorio-state').textContent = data.factorio.running ? 'Online' : 'Offline');
-    byId('overview-players') && (byId('overview-players').textContent = data.players.filter((player) => player.connected).length);
-    byId('overview-players-detail') && (byId('overview-players-detail').textContent = `${data.players.length} known profiles`);
-    byId('overview-saves') && (byId('overview-saves').textContent = data.storage.save_count);
-    byId('overview-save-detail') && (byId('overview-save-detail').textContent = `Configured: ${data.storage.save_details?.configured || '—'}`);
-    byId('overview-mods') && (byId('overview-mods').textContent = data.storage.mod_count);
-    byId('overview-mod-detail') && (byId('overview-mod-detail').textContent = `${data.storage.mod_count} archives in storage`);
-    byId('status-factorio').textContent = data.factorio.running ? 'Online' : 'Offline';
-    byId('status-factorio-detail').textContent = `v${data.factorio.version} · UDP ${data.factorio.game_port}`;
-    byId('status-bridge').textContent = data.bridge.running ? 'Connected' : 'Stopped';
-    byId('status-bridge-detail').textContent = data.bridge.rcon_password_present ? 'RCON credentials ready' : 'Waiting for RCON';
-    byId('status-player-count').textContent = data.players.length;
-    byId('status-save-count').textContent = data.storage.save_count;
-    byId('status-save-detail').textContent = `${data.storage.mod_count} installed mods`;
-    byId('status-save-file').textContent = `Configured save: ${data.storage.save_details?.configured || '—'}`;
-    const externalHost = window.location.hostname || data.bridge.host || '—';
-    byId('status-host').textContent = externalHost;
-    byId('status-connection-detail').textContent = `Host ${externalHost} · Factorio UDP ${data.factorio.game_port} · RCON TCP ${data.factorio.rcon_port}`;
-    byId('status-mod-detail').textContent = `${data.storage.mod_count} mods installed`;
-    byId('server-factorio') && (byId('server-factorio').textContent = data.factorio.running ? 'Online' : 'Offline');
-    byId('server-factorio-detail') && (byId('server-factorio-detail').textContent = `v${data.factorio.version} · UDP ${data.factorio.game_port}`);
-    byId('server-factorio-dot')?.classList.toggle('online', Boolean(data.factorio.running));
-    byId('server-factorio-dot')?.classList.toggle('offline', !data.factorio.running);
-    byId('server-bridge') && (byId('server-bridge').textContent = data.bridge.running ? 'Connected' : 'Stopped');
-    byId('server-bridge-detail') && (byId('server-bridge-detail').textContent = data.bridge.rcon_password_present ? 'RCON credentials ready' : 'Waiting for RCON');
-    byId('server-bridge-dot')?.classList.toggle('online', Boolean(data.bridge.running));
-    byId('server-bridge-dot')?.classList.toggle('offline', !data.bridge.running);
-    byId('server-web') && (byId('server-web').textContent = data.processes?.web ? 'Running' : 'Stopped');
-    byId('server-web-dot')?.classList.toggle('online', Boolean(data.processes?.web));
-    byId('server-web-dot')?.classList.toggle('offline', !data.processes?.web);
-    byId('server-connection') && (byId('server-connection').innerHTML = `<div class="storage-row"><span>Host</span><b>${escapeHtml(externalHost)}</b></div><div class="storage-row"><span>Factorio UDP</span><b>${data.factorio.game_port}</b></div><div class="storage-row"><span>RCON TCP</span><b>${data.factorio.rcon_port}</b></div>`);
-    byId('server-storage') && (byId('server-storage').innerHTML = `<div class="storage-row"><span>Save directory</span><b>${escapeHtml(data.storage.save_details?.directory || '—')}</b></div><div class="storage-row"><span>Configured save</span><b>${escapeHtml(data.storage.save_details?.configured || '—')}</b></div><div class="storage-row"><span>Installed mods</span><b>${data.storage.mod_count}</b></div>`);
-    byId('system-web-status').textContent = data.processes?.web ? 'Running' : 'Stopped';
-    byId('system-factorio-status').textContent = data.processes?.factorio ? 'Running' : 'Stopped';
-    byId('system-storage-meta').textContent = `${data.storage.save_count} saves · ${data.storage.mod_count} mods`;
-    byId('system-storage').innerHTML = `<div class="storage-row"><span>Save directory</span><b>${escapeHtml(data.storage.save_details?.directory || '—')}</b></div><div class="storage-row"><span>Configured save</span><b>${escapeHtml(data.storage.save_details?.configured || '—')}</b></div><div class="storage-row"><span>Log lines shown</span><b>${data.log.length}</b></div>`;
-    const onlinePlayers = data.players.filter((player) => player.connected);
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(`API returned ${response.status} ${response.statusText || 'non-JSON response'}`);
+    }
+    if (!response.ok) throw new Error(data.error || `API returned ${response.status}`);
+    const players = Array.isArray(data.players) ? data.players : [];
+    const storage = data.storage && typeof data.storage === 'object' ? data.storage : {};
+    const saveDetails = storage.save_details && typeof storage.save_details === 'object' ? storage.save_details : {};
+    const processes = data.processes && typeof data.processes === 'object' ? data.processes : {};
+    const bridge = data.bridge && typeof data.bridge === 'object' ? data.bridge : {};
+    const factorio = data.factorio && typeof data.factorio === 'object' ? data.factorio : {};
+    setText('server-name', factorio.name || 'Factory reference');
+    byId('header-status')?.replaceChildren(document.createTextNode(factorio.running ? 'ONLINE' : 'OFFLINE'));
+    byId('header-status-dot')?.classList.toggle('online', Boolean(factorio.running));
+    byId('header-status-dot')?.classList.toggle('offline', !factorio.running);
+    byId('overview-factorio-state') && (byId('overview-factorio-state').textContent = factorio.running ? 'Online' : 'Offline');
+    byId('overview-players') && (byId('overview-players').textContent = players.filter((player) => player.connected).length);
+    byId('overview-players-detail') && (byId('overview-players-detail').textContent = `${players.length} known profiles`);
+    byId('overview-saves') && (byId('overview-saves').textContent = storage.save_count || 0);
+    byId('overview-save-detail') && (byId('overview-save-detail').textContent = `Configured: ${saveDetails.configured || '—'}`);
+    byId('overview-mods') && (byId('overview-mods').textContent = storage.mod_count || 0);
+    byId('overview-mod-detail') && (byId('overview-mod-detail').textContent = `${storage.mod_count || 0} archives in storage`);
+    setText('status-factorio', factorio.running ? 'Online' : 'Offline');
+    setText('status-factorio-detail', `v${factorio.version || '—'} · UDP ${factorio.game_port || '—'}`);
+    const connection = data.connection || {};
+    const hostname = connection.hostname || window.location.hostname || '—';
+    const hostIp = connection.ip || bridge.host || '—';
+    const configuredSave = saveDetails.configured || '';
+    if (!Array.isArray(saveDetails.files) && Array.isArray(storage.saves)) saveDetails.files = storage.saves;
+    const backupToggle = byId('save-backups-enabled');
+    if (backupToggle) backupToggle.checked = Boolean(saveDetails.backup_enabled);
+    byId('save-backup-mode') && (byId('save-backup-mode').value = saveDetails.backup_mode || 'interval');
+    byId('save-backup-interval') && (byId('save-backup-interval').value = saveDetails.backup_interval_hours || 12);
+    byId('save-backup-daily-time') && (byId('save-backup-daily-time').value = saveDetails.backup_daily_time || '00:00');
+    byId('save-backup-max-saves') && (byId('save-backup-max-saves').value = saveDetails.backup_max_saves || 14);
+    byId('save-backup-max-size') && (byId('save-backup-max-size').value = saveDetails.backup_max_total_size_mb ?? 0);
+    updateBackupScheduleVisibility();
+    byId('save-configured-name') && (byId('save-configured-name').textContent = configuredSave || '—');
+    byId('save-count-tag') && (byId('save-count-tag').textContent = `${(saveDetails.files || []).length} FILES`);
+    byId('save-directory-label') && (byId('save-directory-label').textContent = saveDetails.directory || '—');
+    const sizeLimit = Number(saveDetails.backup_max_total_size_mb || 0);
+    const retentionSummary = `${saveDetails.backup_max_saves || 14} saves${sizeLimit ? ` · ${sizeLimit} MB` : ''}`;
+    byId('save-backup-status') && (byId('save-backup-status').textContent = saveDetails.last_backup ? `Latest: ${saveDetails.last_backup} · Retention: ${retentionSummary}` : `Retention: ${retentionSummary}`);
+    const restore = data.restore || {};
+    byId('save-restore-status') && (byId('save-restore-status').textContent = restore.message || `Restore ${restore.state || 'ready'}`);
+    renderSaveFiles(saveDetails);
+    const saveFile = (saveDetails.files || []).find((file) => file.name === configuredSave);
+    setText('overview-server-badge', factorio.running ? 'ONLINE' : 'OFFLINE');
+    byId('overview-server-badge')?.classList.toggle('overview-badge-offline', !factorio.running);
+    byId('overview-server-dot')?.classList.toggle('online', Boolean(factorio.running));
+    byId('overview-server-dot')?.classList.toggle('offline', !factorio.running);
+    setText('overview-hostname', hostname);
+    setText('overview-ip', hostIp);
+    setText('overview-game-port', connection.game_port || factorio.game_port || '—');
+    byId('overview-save-name').textContent = configuredSave || '—';
+    byId('overview-save-size').textContent = formatBytes(saveFile?.size);
+    setText('overview-save-directory', saveDetails.directory || '—');
+    setText('overview-deaths', players.reduce((total, player) => total + Number(player.deaths || 0), 0).toLocaleString());
+    const monitors = data.watchdog?.monitors?.length
+      ? data.watchdog.monitors.map((monitor) => [monitor.name, monitor.healthy])
+      : [['Web service', processes.web], ['Bridge worker', processes.bridge], ['Factorio process', processes.factorio]];
+    const healthyMonitors = monitors.filter(([, healthy]) => healthy).length;
+    setText('overview-bridge-badge', `${healthyMonitors}/${monitors.length} HEALTHY`);
+    byId('overview-bridge-badge')?.classList.toggle('overview-badge-offline', healthyMonitors !== monitors.length);
+    const monitorElement = byId('overview-monitors');
+    if (monitorElement) monitorElement.innerHTML = monitors.map(([label, healthy]) => `<div class="overview-monitor"><span class="overview-monitor-light ${healthy ? 'online' : 'offline'}"></span><span>${label}</span><b>${healthy ? 'OK' : 'PROBLEM'}</b></div>`).join('');
+    setText('status-bridge', bridge.running ? 'Connected' : 'Stopped');
+    setText('status-bridge-detail', bridge.rcon_password_present ? 'RCON credentials ready' : 'Waiting for RCON');
+    setText('status-player-count', players.length);
+    setText('status-save-count', storage.save_count || 0);
+    setText('status-save-detail', `${storage.mod_count || 0} installed mods`);
+    setText('status-save-file', `Configured save: ${configuredSave || '—'}`);
+    const externalHost = hostname;
+    const gamePort = connection.game_port || factorio.game_port || '—';
+    const rconPort = connection.rcon_port || factorio.rcon_port || '—';
+    setText('status-host', externalHost);
+    setText('status-connection-detail', `Host ${externalHost} (${hostIp}) · Factorio UDP ${gamePort} · RCON TCP ${rconPort}`);
+    setText('status-mod-detail', `${storage.mod_count || 0} mods installed`);
+    byId('server-factorio') && (byId('server-factorio').textContent = factorio.running ? 'Online' : 'Offline');
+    byId('server-factorio-detail') && (byId('server-factorio-detail').textContent = `v${factorio.version || '—'} · UDP ${factorio.game_port || '—'}`);
+    byId('server-factorio-dot')?.classList.toggle('online', Boolean(factorio.running));
+    byId('server-factorio-dot')?.classList.toggle('offline', !factorio.running);
+    byId('server-bridge') && (byId('server-bridge').textContent = bridge.running ? 'Connected' : 'Stopped');
+    byId('server-bridge-detail') && (byId('server-bridge-detail').textContent = bridge.rcon_password_present ? 'RCON credentials ready' : 'Waiting for RCON');
+    byId('server-bridge-dot')?.classList.toggle('online', Boolean(bridge.running));
+    byId('server-bridge-dot')?.classList.toggle('offline', !bridge.running);
+    byId('server-web') && (byId('server-web').textContent = processes.web ? 'Running' : 'Stopped');
+    byId('server-web-dot')?.classList.toggle('online', Boolean(processes.web));
+    byId('server-web-dot')?.classList.toggle('offline', !processes.web);
+    byId('server-connection') && (byId('server-connection').innerHTML = `<div class="storage-row"><span>Hostname</span><b>${escapeHtml(externalHost)}</b></div><div class="storage-row"><span>IP address</span><b>${escapeHtml(hostIp)}</b></div><div class="storage-row"><span>Factorio UDP</span><b>${gamePort}</b></div><div class="storage-row"><span>RCON TCP</span><b>${rconPort}</b></div>`);
+    byId('server-storage') && (byId('server-storage').innerHTML = `<div class="storage-row"><span>Save directory</span><b>${escapeHtml(saveDetails.directory || '—')}</b></div><div class="storage-row"><span>Configured save</span><b>${escapeHtml(configuredSave || '—')}</b></div><div class="storage-row"><span>Installed mods</span><b>${storage.mod_count || 0}</b></div>`);
+    setText('system-web-status', processes.web ? 'Running' : 'Stopped');
+    setText('system-factorio-status', processes.factorio ? 'Running' : 'Stopped');
+    setText('system-storage-meta', `${storage.save_count || 0} saves · ${storage.mod_count || 0} mods`);
+    const systemStorage = byId('system-storage');
+    if (systemStorage) systemStorage.innerHTML = `<div class="storage-row"><span>Save directory</span><b>${escapeHtml(saveDetails.directory || '—')}</b></div><div class="storage-row"><span>Configured save</span><b>${escapeHtml(configuredSave || '—')}</b></div><div class="storage-row"><span>Log lines shown</span><b>${Array.isArray(data.log) ? data.log.length : 0}</b></div>`;
+    const onlinePlayers = players.filter((player) => player.connected);
     renderResearchSummary();
     if (technologyEntries.length) renderTechnologyTree();
-    const offlinePlayers = data.players.filter((player) => !player.connected);
+    const offlinePlayers = players.filter((player) => !player.connected);
     const playerCard = (player) => {
       if (!player.connected) {
         return `<article class="player-card player-offline"><div class="player-avatar"><span class="player-avatar-fallback">${escapeHtml(player.name.slice(0, 1).toUpperCase())}</span></div><div class="player-main"><div class="player-heading"><h3>${escapeHtml(player.name)}</h3></div><span class="status-detail">Offline</span></div><strong>Offline</strong></article>`;
@@ -437,21 +520,24 @@ async function refreshStatus() {
       return `<article class="player-card player-online"><div class="player-avatar">${armorBadge}</div><div class="player-main"><div class="player-heading"><h3>${escapeHtml(player.name)}</h3><div class="player-flags">${activityFlags}</div></div><span class="status-detail">${escapeHtml(player.surface)} · ${escapeHtml(player.x)}, ${escapeHtml(player.y)}</span><div class="player-health"><div class="player-health-label"><span>${escapeHtml(health)} / ${escapeHtml(maxHealth)} HP</span><span>${escapeHtml(armorName)}</span></div><div class="player-healthbar" aria-label="Health ${Math.round(healthPercent)} percent"><span style="width:${healthPercent.toFixed(1)}%"></span></div></div><span class="player-stats">${escapeHtml(armorName)} · ${escapeHtml(armor.equipment_count || 0)} equipment · ${escapeHtml(inventoryLabel)} · ${player.idle ? 'AFK' : 'Active'}</span></div><strong>${escapeHtml(player.deaths)} <small>deaths</small></strong></article>`;
     };
     const playerSection = (title, entries, empty) => `<section class="player-section"><div class="section-heading"><h3>${title}</h3><span class="panel-tag">${entries.length}</span></div>${entries.length ? `<div class="player-grid">${entries.map(playerCard).join('')}</div>` : `<p class="muted">${empty}</p>`}</section>`;
-    byId('player-results').innerHTML = playerSection('Online now', onlinePlayers, 'No players are connected.') + playerSection('Offline', offlinePlayers, 'No offline player profiles yet.');
-    if (byId('status-log-output')) byId('status-log-output').textContent = data.log.length ? data.log.join('\n') : 'No log output yet.';
+    const playerResults = byId('player-results');
+    if (playerResults) playerResults.innerHTML = playerSection('Online now', onlinePlayers, 'No players are connected.') + playerSection('Offline', offlinePlayers, 'No offline player profiles yet.');
+    if (byId('status-log-output')) byId('status-log-output').textContent = data.log?.length ? data.log.join('\n') : 'No log output yet.';
     const telemetryResponse = await fetch(apiUrl('api/telemetry/events?limit=50'), { cache: 'no-store' });
     const telemetry = telemetryResponse.ok ? await telemetryResponse.json() : { events: [] };
     const events = Array.isArray(telemetry.events) ? telemetry.events : [];
-    byId('telemetry-event-meta').textContent = `${events.length} EVENTS`;
-    byId('telemetry-events').innerHTML = events.length
+    setText('telemetry-event-meta', `${events.length} EVENTS`);
+    const telemetryEvents = byId('telemetry-events');
+    if (telemetryEvents) telemetryEvents.innerHTML = events.length
       ? events.slice().reverse().map((event) => `<div class="telemetry-event"><strong>${escapeHtml(event.event)}</strong><span>${escapeHtml(event.bridge_received_at || `tick ${event.tick ?? '—'}`)}</span><code>${escapeHtml(JSON.stringify(event))}</code></div>`).join('')
       : '<p class="muted">No structured telemetry events yet.</p>';
-    byId('status-updated').textContent = `UPDATED ${new Date(data.generated_at * 1000).toLocaleTimeString()}`;
+    setText('status-updated', `UPDATED ${new Date(data.generated_at * 1000).toLocaleTimeString()}`);
     byId('overview-stamp') && (byId('overview-stamp').textContent = `LIVE · ${new Date(data.generated_at * 1000).toLocaleTimeString()}`);
-    byId('players-stamp') && (byId('players-stamp').textContent = `${data.players.length} PROFILES`);
+    byId('players-stamp') && (byId('players-stamp').textContent = `${players.length} PROFILES`);
   } catch (error) {
-    byId('status-factorio').textContent = 'Unavailable';
-    byId('status-updated').textContent = 'CONNECTION UNAVAILABLE';
+    console.error('Factorio Assistant status refresh failed', error);
+    byId('status-factorio') && (byId('status-factorio').textContent = 'Unavailable');
+    byId('status-updated') && (byId('status-updated').textContent = `CONNECTION UNAVAILABLE: ${error.message || 'request failed'}`);
   }
 }
 async function refreshWorld() {
@@ -460,9 +546,15 @@ async function refreshWorld() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
     const surfaces = Array.isArray(data.surfaces) ? data.surfaces : [];
+    renderResourceMonitor(data);
     const players = Array.isArray(data.players) ? data.players : [];
     const available = Boolean(data.available);
     byId('world-tick').textContent = available ? Number(data.tick).toLocaleString() : 'Unavailable';
+    const onlinePlayers = players.filter((player) => player.connected).length;
+    const hasLiveMetrics = available && (players.length > 0 || data.game_time !== '' && data.game_time !== null && data.game_time !== undefined);
+    if (hasLiveMetrics) lastWorldMetrics = { players: onlinePlayers, gameTime: data.game_time };
+    setText('overview-online-players', lastWorldMetrics.players ?? '—');
+    setText('overview-game-time', formatGameTime(lastWorldMetrics.gameTime));
     byId('overview-tick') && (byId('overview-tick').textContent = data.available ? Number(data.tick).toLocaleString() : '—');
     byId('world-state-title') && (byId('world-state-title').textContent = available ? 'Nauvis is running' : 'World unavailable');
     byId('world-state-detail') && (byId('world-state-detail').textContent = available ? `${surfaces.length} surfaces · ${players.length} players connected` : (data.error || 'The bridge is not reporting a live world.'));
@@ -493,6 +585,8 @@ async function refreshWorld() {
   } catch (error) {
     byId('world-tick').textContent = 'Unavailable';
     byId('world-surface-list').textContent = error.message || 'World telemetry unavailable';
+    setText('overview-online-players', lastWorldMetrics.players ?? '—');
+    setText('overview-game-time', formatGameTime(lastWorldMetrics.gameTime));
   }
 }
 async function restoreSave(source) {
@@ -500,14 +594,52 @@ async function restoreSave(source) {
   const response = await fetch(apiUrl('api/saves/restore'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }) });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Restore failed.');
+  await waitForRestore();
   await refreshWorld();
+}
+async function waitForRestore() {
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    await refreshStatus();
+    const state = byId('save-restore-status')?.textContent || '';
+    if (!['Stopping', 'Restoring', 'Starting'].some((phase) => state.includes(phase))) return;
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+  }
+}
+async function deleteSave(name) {
+  if (!window.confirm(`Delete ${name}?`)) return;
+  const response = await fetch(apiUrl('api/saves/delete'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Delete failed.');
+  await refreshStatus();
+}
+function renderSaveFiles(details) {
+  const results = byId('save-file-results');
+  if (!results) return;
+  if (!byId('save-file-filter')) {
+    results.insertAdjacentHTML('beforebegin', '<div class="save-files-toolbar"><span id="save-filter-count" class="status-detail">Loading save files...</span><label class="save-filter-control"><span>Show</span><select id="save-file-filter"><option value="all">All saves and backups</option><option value="save">Saves only</option><option value="matching-backups">Configured save and matching backups</option></select></label></div>');
+    byId('save-file-filter').addEventListener('change', (event) => { saveFileFilter = event.target.value; renderSaveFiles(details); });
+  }
+  const configured = details.configured || '';
+  const files = Array.isArray(details.files) ? details.files : [];
+  const visibleFiles = files.filter((file) => saveFileFilter === 'all' || (saveFileFilter === 'save' ? !file.backup : file.backup || file.name === configured));
+  setText('save-filter-count', `${visibleFiles.length} of ${files.length} files`);
+  results.innerHTML = visibleFiles.length ? visibleFiles.map((file) => {
+    const isConfigured = file.name === configured;
+    const kind = isConfigured ? 'CONFIGURED' : file.backup ? 'BACKUP' : file.autosave ? 'AUTOSAVE' : 'SAVE';
+    const actions = isConfigured ? '<span class="panel-tag">ACTIVE</span>' : `<button class="save-action-button restore-save" data-save-restore="${escapeHtml(file.name)}">Restore</button><button class="save-action-button save-delete-button" data-save-delete="${escapeHtml(file.name)}">Delete</button>`;
+    const timestamp = Number(file.modified || 0) ? new Date(Number(file.modified) * 1000).toLocaleString() : 'Timestamp unavailable';
+    return `<article class="save-file-card save-file-${kind.toLowerCase()}"><div class="save-file-card-heading"><span class="save-file-icon">▣</span><span class="save-file-kind">${kind}</span></div><strong class="save-file-name">${escapeHtml(file.name)}</strong><div class="save-file-details"><span>${formatBytes(file.size)}</span><span>${escapeHtml(timestamp)}</span></div><div class="save-file-actions">${actions}</div></article>`;
+  }).join('') : `<p class="muted">No ${saveFileFilter === 'matching-backups' ? 'matching backup' : saveFileFilter === 'save' ? 'save' : 'save'} files found.</p>`;
+  results.querySelectorAll('[data-save-restore]').forEach((button) => button.addEventListener('click', () => restoreSave(button.dataset.saveRestore).catch((error) => window.alert(error.message))));
+  results.querySelectorAll('[data-save-delete]').forEach((button) => button.addEventListener('click', () => deleteSave(button.dataset.saveDelete).catch((error) => window.alert(error.message))));
 }
 function switchAppTab(tabName, refresh = true) {
   document.querySelectorAll('[data-app-tab]').forEach((tab) => tab.classList.toggle('active', tab.dataset.appTab === tabName));
   document.querySelectorAll('[data-app-view]').forEach((view) => view.classList.toggle('active', view.dataset.appView === tabName));
   if (!refresh) return;
-  if (tabName === 'server' || tabName === 'players' || tabName === 'system' || tabName === 'logs') refreshStatus();
+  if (tabName === 'server' || tabName === 'players' || tabName === 'system' || tabName === 'logs' || tabName === 'resources') refreshStatus();
   if (tabName === 'world') { refreshStatus(); refreshWorld(); }
+  if (tabName === 'resources') refreshWorld();
   if (tabName === 'catalog') { renderExploreTabs(); refreshExplore(); refreshCatalogMetadata(); }
 }
 document.querySelectorAll('[data-app-tab]').forEach((tab) => tab.addEventListener('click', () => switchAppTab(tab.dataset.appTab)));
@@ -517,7 +649,35 @@ byId('explore-previous')?.addEventListener('click', () => { exploreOffset = Math
 byId('explore-next')?.addEventListener('click', () => { exploreOffset += 48; refreshExplore(); });
 byId('status-refresh').addEventListener('click', refreshStatus);
 byId('world-refresh').addEventListener('click', refreshWorld);
+byId('resources-refresh')?.addEventListener('click', refreshWorld);
 byId('logs-refresh').addEventListener('click', refreshStatus);
+async function updateBackupSettings() {
+  const enabled = byId('save-backups-enabled').checked;
+  const mode = byId('save-backup-mode').value;
+  const interval_hours = Number(byId('save-backup-interval').value);
+  const daily_time = byId('save-backup-daily-time').value;
+  const max_saves = Number(byId('save-backup-max-saves').value);
+  const max_total_size_mb = Number(byId('save-backup-max-size').value);
+  if (!Number.isInteger(interval_hours) || interval_hours < 1 || !Number.isInteger(max_saves) || max_saves < 1 || !Number.isInteger(max_total_size_mb) || max_total_size_mb < 0 || (mode === 'daily' && !daily_time)) {
+    window.alert('Enter valid schedule and retention values.');
+    return;
+  }
+  const response = await fetch(apiUrl('api/saves/backup-settings'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, mode, interval_hours, daily_time, max_saves, max_total_size_mb }) });
+  const data = await response.json();
+  if (!response.ok) window.alert(data.error || 'Backup setting failed.');
+  else await refreshStatus();
+}
+function updateBackupScheduleVisibility() {
+  const daily = byId('save-backup-mode')?.value === 'daily';
+  if (byId('save-backup-interval-label')) byId('save-backup-interval-label').hidden = daily;
+  if (byId('save-backup-daily-label')) byId('save-backup-daily-label').hidden = !daily;
+}
+byId('save-backups-enabled')?.addEventListener('change', updateBackupSettings);
+byId('save-backup-mode')?.addEventListener('change', () => { updateBackupScheduleVisibility(); updateBackupSettings(); });
+byId('save-backup-interval')?.addEventListener('change', updateBackupSettings);
+byId('save-backup-daily-time')?.addEventListener('change', updateBackupSettings);
+byId('save-backup-max-saves')?.addEventListener('change', updateBackupSettings);
+byId('save-backup-max-size')?.addEventListener('change', updateBackupSettings);
 syncHomeAssistantTheme();
 try {
   new MutationObserver(syncHomeAssistantTheme).observe(window.parent.document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });

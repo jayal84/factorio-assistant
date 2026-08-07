@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.2 - Resource localization and packaging
+
+- Pass the available player into resource translation requests and retries.
+- Resolve stale resource IDs through the generated Factorio catalog in telemetry consumers.
+- Package the bundled mod as `factorio_assistant_0.2.2.zip`.
+
+## 0.1.11 - Pinned Resource Monitor telemetry
+
+- Export only pinned, active DQOL Resource Monitor sites in world snapshots.
+- Publish one Home Assistant sensor per pinned site under a surface-specific
+	`Factorio Resource Monitor: <Surface Name>` device.
+
+## 0.1.10 - Sender signal controls
+
+- Import signals from both red and green Sender input networks and identify
+	their contributing networks in Home Assistant attributes.
+- Add retained red and green `Signal A` through `Signal D` number controls per Sender.
+
+## 0.1.9 - Day/night controls
+
+- Add Home Assistant controls for the day/night cycle and forced daylight.
+
 ## 0.1.8 - Sender naming and signal units
 
 - Name Home Assistant devices `Factorio Assistant Sender: <description>`.

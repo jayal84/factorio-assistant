@@ -31,8 +31,35 @@ reader and one numeric sensor per circuit signal. Discovery configuration,
 signal state, signal attributes, and availability are retained. The device is
 named `Factorio Assistant Sender: <Name>` when its in-game description is set,
 otherwise the Factorio unit number is used. Signal sensors report numeric
-counts without a unit of measurement. Their attributes include `Placed by`,
-surface, position, signal type, quality, and the raw Factorio signal name.
+counts without a unit of measurement. Both red and green input networks are
+read by default and are always exposed as separate sensors. Names use the
+configured Factorio locale followed by the network, such as `Iron Plate (Red)`
+and `Iron Plate (Green)`. Their attributes include `Placed by`, surface,
+position, signal type, quality, raw Factorio signal name, and `Network`.
+
+Each Sender also creates eight writable number entities: `Red Signal A` through
+`Red Signal D` and `Green Signal A` through `Green Signal D`. Their values are
+retained by the mod and kept separate by wire network.
+
+It also creates eight read-only input sensors for those same signal slots. For
+example, `Red Signal A Input` reports the live `signal-A` value received on the
+red network, while `Green Signal A Input` reports the green network value.
+
+When DQOL Resource Monitor is installed, only pinned active sites are imported.
+Each surface gets a `Factorio Resource Monitor: <Surface Name>` device. Each
+pinned site gets separate unitless sensors for amount, localized ore type,
+percentage remaining, location, estimated depletion, and extraction rate
+(`/s`) under
+`<mqtt_prefix>/resource_monitor/<surface>/<site_id>/<metric>`.
+
+The estimated depletion value is published in seconds with Home Assistant's
+duration device class. Resource Monitor is included in the Factorio Assistant
+mod, so multiplayer clients only need the same Factorio Assistant archive.
+
+Circuit signal values and Factorio entity states intentionally have no unit of
+measurement because they are game counts or categorical values, not physical
+quantities. Player inventory state uses `%` for used slots; the item breakdown
+remains in its JSON attributes.
 
 When a reader is mined, destroyed, or killed, the mod emits a removal event.
 The bridge clears each retained discovery topic with an empty retained payload,
@@ -70,25 +97,31 @@ The Factorio Server device exposes these switches:
 - `switch.factorio_server_enemy_evolution`
 - `switch.factorio_server_pollution`
 - `switch.factorio_server_pause`
+- `switch.factorio_server_daylight`
 
 It also exposes these controls:
 
 - `button.factorio_server_save`
 - `number.factorio_server_game_speed` from `0.1` to `10.0`
 - `text.factorio_server_broadcast_chat`
+- `button.factorio_server_day_night_cycle_resume`, available only while the day/night cycle is stopped
+- `number.factorio_server_time_of_day` from `0.0` to `1.0`
 
 The default command topics are:
 
 - `homeassistant/switch/factorio_server/factorio_server_enemy_evolution/set`
 - `homeassistant/switch/factorio_server/factorio_server_pollution/set`
 - `homeassistant/switch/factorio_server/factorio_server_pause/set`
+- `homeassistant/switch/factorio_server/factorio_server_daylight/set`
 - `homeassistant/button/factorio_server/factorio_server_save/set`
 - `homeassistant/number/factorio_server/factorio_server_game_speed/set`
 - `homeassistant/text/factorio_server/factorio_server_broadcast_chat/set`
+- `homeassistant/button/factorio_server/factorio_server_day_night_cycle_resume/set`
+- `homeassistant/number/factorio_server/factorio_server_time_of_day/set`
 
 Replace `homeassistant` with the configured `mqtt_prefix` when it differs from the default.
 
-Use `ON` and `OFF` payloads for switches. Pause uses `/silent-command game.tick_paused = true` and `/silent-command game.tick_paused = false`. The save button uses `/server-save` when the structured mod control is unavailable. Game speed accepts values from `0.1` to `10.0`. Broadcast chat sends the text to all players with `game.print`.
+Use `ON` and `OFF` payloads for switches. The Resume Day/Night Cycle button is available only when telemetry reports the cycle stopped and resumes it with `PRESS`. Daylight `ON` freezes all surfaces at midday; `OFF` freezes them at night. Time of Day sets Factorio's synchronized `daytime` value from `0.0` to `1.0`. Pause uses `/silent-command game.tick_paused = true` and `/silent-command game.tick_paused = false`. The save button uses `/server-save` when the structured mod control is unavailable. Game speed accepts values from `0.1` to `10.0`. Broadcast chat sends the text to all players with `game.print`.
 
 ## Game Data Search
 

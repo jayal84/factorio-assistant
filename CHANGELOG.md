@@ -2,6 +2,24 @@
 
 All notable changes to **Factorio Assistant** will be documented here.
 
+## 0.2.2 - 2026-08-07 - Bug fixes from 0.2.1
+
+- Fixed runtime translation retries so modded resource names resolve for players.
+- Added catalog-backed fallback localization for Home Assistant and ingress telemetry.
+- Display localized resource names without exposing internal Angel prototype IDs.
+- Prepared the `factorio_assistant_0.2.2.zip` mod package.
+
+## 0.2.1 - 2026-08-07
+
+- Fixed localized resource names by resolving the authoritative Factorio locale domains, including modded resources such as Angel's Saphirite and Stiratite.
+- Exported only pinned, active Resource Monitor sites to Home Assistant with localized ore names, reserve amount (`items`), remaining percentage, location, depletion estimate, and extraction rate (`items/s`).
+- Added a Resource monitor tab to the authenticated ingress page with one live card per exported pinned site.
+- Kept Resource Monitor MQTT entities grouped by surface to avoid creating a Home Assistant device for every site.
+- Standardized unit metadata: physical or count-like measurements declare units, while circuit signals and categorical game entity states remain unitless.
+- Preserved player inventory percentage reporting while keeping the detailed item breakdown in JSON attributes.
+- Added retained MQTT discovery cleanup for removed Resource Monitor sites and improved localized tooltip and catalog handling.
+- Documented integrated Resource Monitor attribution and release packaging details.
+
 ## 0.1.8 - 2026-08-06
 
 - Added per-save runtime-global settings for combinator telemetry, scan cadence, wire selection, signal limits, event telemetry, world snapshots, and inventory details.

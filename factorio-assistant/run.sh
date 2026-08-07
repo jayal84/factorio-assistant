@@ -27,6 +27,8 @@ MODS_DIR="${DATA_DIR}/mods"
 SCRIPT_OUTPUT_DIR="${DATA_DIR}/script-output"
 DATA_OUTPUT_DIR="${CATALOG_RUNTIME_DIR}"
 RUNTIME_DIR="${CONFIG_DIR}/runtime"
+RESTORE_REQUEST_PATH="${RUNTIME_DIR}/restore-request.json"
+RESTORE_STATUS_PATH="${RUNTIME_DIR}/restore-status.json"
 LOG_FILE="${LOGS_DIR}/factorio-current.log"
 RCON_PORT=27015
 GAME_PORT=34197
@@ -105,6 +107,17 @@ log_factorio_warn() { log_msg "WARNING" "$1" "Factorio Assistant] [Factorio Exec
 log_factorio_error() { log_msg "ERROR" "$1" "Factorio Assistant] [Factorio Executable"; }
 log_factorio_fatal() { log_msg "FATAL" "$1" "Factorio Assistant] [Factorio Executable"; }
 log_component() { log_msg "$1" "$2" "Factorio Assistant] [$3"; }
+
+write_restore_status() {
+    local state="$1"
+    local message="$2"
+    local source="${3:-}"
+    local target="${4:-}"
+    local temporary_path="${RESTORE_STATUS_PATH}.tmp"
+    jq -n --arg state "$state" --arg message "$message" --arg source "$source" --arg target "$target" \
+        '{state:$state,message:$message,source:$source,target:$target,updated_at:now}' > "$temporary_path"
+    mv -f "$temporary_path" "$RESTORE_STATUS_PATH"
+}
 
 format_factorio_output() {
     python3 -u -c 'import re, sys
@@ -215,7 +228,7 @@ if [ -f "$CONFIG_FILE" ]; then
     FACTORIO_TOKEN=$(jq -r '.factorio_token // .factorio_service_token // empty' "$CONFIG_FILE")
     SAVE_NAME=$(jq -r '.save_name // "world.zip"' "$CONFIG_FILE")
     ENABLE_MOD_UPDATES_RAW=$(jq -r '.enable_mod_updates // .options.enable_mod_updates // "false"' "$CONFIG_FILE" | tr '[:upper:]' '[:lower:]')
-    ENABLE_TELEMETRY_MOD_RAW=$(jq -r '.enable_telemetry_mod // false' "$CONFIG_FILE" | tr '[:upper:]' '[:lower:]')
+    ENABLE_TELEMETRY_MOD_RAW=$(jq -r '.enable_telemetry_mod // .options.enable_telemetry_mod // true' "$CONFIG_FILE" | tr '[:upper:]' '[:lower:]')
     case "$ENABLE_MOD_UPDATES_RAW" in
         true|1|yes|on)
             ENABLE_MOD_UPDATES="true"
@@ -232,7 +245,7 @@ else
     FACTORIO_TOKEN=""
     SAVE_NAME="world.zip"
     ENABLE_MOD_UPDATES="false"
-    ENABLE_TELEMETRY_MOD_RAW="false"
+    ENABLE_TELEMETRY_MOD_RAW="true"
     GAME_PORT=34197
     RCON_PORT=27015
     REST_API_PORT=8100
@@ -242,40 +255,6 @@ case "$ENABLE_TELEMETRY_MOD_RAW" in
     true|1|yes|on) ENABLE_TELEMETRY_MOD="true" ;;
     *) ENABLE_TELEMETRY_MOD="false" ;;
 esac
-
-if [ -d "/app/factorio_assistant" ]; then
-    ENABLE_TELEMETRY_MOD="${ENABLE_TELEMETRY_MOD}" python3 - <<'PY'
-import json
-import os
-
-path = "/share/factorio/mods/mod-list.json"
-name = "factorio_assistant"
-enabled = os.environ.get("ENABLE_TELEMETRY_MOD") == "true"
-try:
-    with open(path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
-except FileNotFoundError:
-    data = {"mods": []}
-except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-    raise SystemExit(f"Could not read {path} without risking other mod entries: {exc}")
-
-if not isinstance(data, dict) or not isinstance(data.get("mods", []), list):
-    raise SystemExit(f"Could not update {path} without risking other mod entries: invalid mod list")
-mods = data["mods"]
-
-entry = next((item for item in mods if isinstance(item, dict) and item.get("name") == name), None)
-if entry is None:
-    mods.append({"name": name, "enabled": enabled})
-else:
-    entry["enabled"] = enabled
-
-temporary_path = f"{path}.tmp"
-with open(temporary_path, "w", encoding="utf-8") as handle:
-    json.dump(data, handle, indent=2)
-os.replace(temporary_path, path)
-PY
-    log_info "Factorio Assistant mod registered for Mod Portal retrieval (enabled=${ENABLE_TELEMETRY_MOD})"
-fi
 
 validate_port() {
     local name="$1"
@@ -507,6 +486,46 @@ EOF
 else
     log_info "Mod updates are disabled in configuration. Skipping Mod Portal sync."
 fi
+
+if [ -d "/app/factorio_assistant" ]; then
+    ENABLE_TELEMETRY_MOD="${ENABLE_TELEMETRY_MOD}" python3 - <<'PY'
+import json
+import os
+
+path = "/share/factorio/mods/mod-list.json"
+name = "factorio_assistant"
+enabled = os.environ.get("ENABLE_TELEMETRY_MOD") == "true"
+try:
+    with open(path, "r", encoding="utf-8-sig") as handle:
+        data = json.load(handle)
+except FileNotFoundError:
+    data = {"mods": []}
+except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+    raise SystemExit(f"Could not read {path} without risking other mod entries: {exc}")
+
+if not isinstance(data, dict) or not isinstance(data.get("mods", []), list):
+    raise SystemExit(f"Could not update {path} without risking other mod entries: invalid mod list")
+mods = data["mods"]
+
+# Resource Monitor is now bundled into Factorio Assistant. Keep the legacy
+# standalone mod disabled so both implementations cannot own the same save.
+for item in mods:
+    if isinstance(item, dict) and item.get("name") == "dqol-resource-monitor":
+        item["enabled"] = False
+
+entry = next((item for item in mods if isinstance(item, dict) and item.get("name") == name), None)
+if entry is None:
+    mods.append({"name": name, "enabled": enabled})
+else:
+    entry["enabled"] = enabled
+
+temporary_path = f"{path}.tmp"
+with open(temporary_path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2)
+os.replace(temporary_path, path)
+PY
+    log_info "Factorio Assistant mod registered after Mod Portal sync (enabled=${ENABLE_TELEMETRY_MOD})"
+fi
 log_debug "Mod synchronization phase complete; continuing with save validation"
 
 # Create the initial world from the editable map settings when the configured save does not exist.
@@ -613,34 +632,64 @@ log_info "Started RCON bridge process with PID ${BRIDGE_PID}"
 log_debug "RCON bridge startup sequence has begun"
 
 # Launch the headless Factorio server with persisted config and logging.
-log_info "Starting Factorio headless server instance..."
-log_debug "Launching Factorio with game port ${GAME_PORT}, RCON port ${RCON_PORT}, and save ${SAVE_PATH}"
-/opt/factorio/bin/x64/factorio \
-  --start-server "${SAVE_PATH}" \
-  --server-settings "${SERVER_SETTINGS}" \
-    --server-adminlist "${SERVER_ADMINLIST}" \
-    --server-whitelist "${SERVER_WHITELIST}" \
-        --use-server-whitelist \
-  --port "${GAME_PORT}" \
-  --rcon-port "${RCON_PORT}" \
-  --rcon-password "${RCON_PASS}" \
-  --mod-directory "${MODS_DIR}" \
-    --console-log "${LOG_FILE}" \
-    > >(format_factorio_output | forward_factorio_output) 2>&1 &
+handle_restore_request() {
+    [ -f "$RESTORE_REQUEST_PATH" ] || return 1
+    local source target source_path target_path temporary_path
+    source=$(jq -r '.source // empty' "$RESTORE_REQUEST_PATH")
+    target=$(jq -r '.target // empty' "$RESTORE_REQUEST_PATH")
+    source_path="${SAVES_DIR}/${source}"
+    target_path="${SAVES_DIR}/${target}"
+    write_restore_status "restoring" "Restoring the selected save." "$source" "$target"
+    if [ -z "$source" ] || [ -z "$target" ] || [ "$(basename "$source")" != "$source" ] || [ "$(basename "$target")" != "$target" ] || [ "${source##*.}" != "zip" ] || [ "${target##*.}" != "zip" ] || [ ! -f "$source_path" ]; then
+        write_restore_status "error" "The restore request was invalid or the source save is unavailable." "$source" "$target"
+        rm -f "$RESTORE_REQUEST_PATH"
+        return 1
+    fi
+    temporary_path="${target_path}.restore.tmp"
+    if ! cp -f "$source_path" "$temporary_path" || ! mv -f "$temporary_path" "$target_path"; then
+        rm -f "$temporary_path" "$RESTORE_REQUEST_PATH"
+        write_restore_status "error" "The selected save could not be restored." "$source" "$target"
+        return 1
+    fi
+    rm -f "$RESTORE_REQUEST_PATH"
+    write_restore_status "starting" "Save restored. Starting Factorio." "$source" "$target"
+    return 0
+}
 
-FACTORIO_PID=$!
-printf '%s\n' "${FACTORIO_PID}" > "${RUNTIME_DIR}/factorio.pid"
-log_notice "Factorio process started with PID ${FACTORIO_PID}"
-log_debug "Main process is waiting for Factorio PID ${FACTORIO_PID}; bridge watchdog remains active in PID ${BRIDGE_PID}"
-set +e
-wait "$FACTORIO_PID"
-FACTORIO_EXIT_CODE=$?
-set -e
-if [ "$FACTORIO_EXIT_CODE" -eq 0 ]; then
-    log_notice "Factorio process exited normally with code 0"
-else
-    log_fatal "Factorio process exited unexpectedly with code ${FACTORIO_EXIT_CODE}"
-fi
+while true; do
+    log_info "Starting Factorio headless server instance..."
+    log_debug "Launching Factorio with game port ${GAME_PORT}, RCON port ${RCON_PORT}, and save ${SAVE_PATH}"
+    /opt/factorio/bin/x64/factorio \
+      --start-server "${SAVE_PATH}" \
+      --server-settings "${SERVER_SETTINGS}" \
+        --server-adminlist "${SERVER_ADMINLIST}" \
+        --server-whitelist "${SERVER_WHITELIST}" \
+            --use-server-whitelist \
+      --port "${GAME_PORT}" \
+      --rcon-port "${RCON_PORT}" \
+      --rcon-password "${RCON_PASS}" \
+      --mod-directory "${MODS_DIR}" \
+        --console-log "${LOG_FILE}" \
+        > >(format_factorio_output | forward_factorio_output) 2>&1 &
+
+    FACTORIO_PID=$!
+    printf '%s\n' "${FACTORIO_PID}" > "${RUNTIME_DIR}/factorio.pid"
+    log_notice "Factorio process started with PID ${FACTORIO_PID}"
+    log_debug "Main process is waiting for Factorio PID ${FACTORIO_PID}; bridge worker remains active in PID ${BRIDGE_PID}"
+    set +e
+    wait "$FACTORIO_PID"
+    FACTORIO_EXIT_CODE=$?
+    set -e
+    if handle_restore_request; then
+        continue
+    fi
+    if [ "$FACTORIO_EXIT_CODE" -eq 0 ]; then
+        log_notice "Factorio process exited normally with code 0"
+    else
+        log_fatal "Factorio process exited unexpectedly with code ${FACTORIO_EXIT_CODE}"
+    fi
+    break
+done
 
 request_stop "${BRIDGE_PID:-}" "RCON bridge"
 request_stop "${WEB_PID:-}" "web console"

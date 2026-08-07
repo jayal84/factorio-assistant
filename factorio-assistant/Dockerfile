@@ -68,7 +68,7 @@ COPY catalog_builder.py /app/catalog_builder.py
 COPY rcon_client.py /app/rcon_client.py
 COPY web_server.py /app/web_server.py
 COPY web /app/web
-COPY factorio_assistant /app/factorio_assistant
+COPY mod /app/factorio_assistant
 RUN chmod +x /app/run.sh
 
 WORKDIR /opt/factorio

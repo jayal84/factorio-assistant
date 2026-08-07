@@ -20,9 +20,23 @@ The add-on configuration directory is `/config` inside the container, backed by 
 
 Back up the `saves` directory and keep sufficient free space for save files, mods, and logs. The add-on creates the configured save automatically when it does not exist. The add-on's configuration backup should include `/addon_configs/local_factorio_assistant` so server settings, map generation, player profiles, and runtime state survive restoration.
 
-## Autosaves
+## Save Backups And Restore
 
 Factorio writes rotating autosaves according to the values in `/config/server-settings.json`.
+
+The add-on uses blocking saves (`non_blocking_saving: false`) for reliable writes on the Home Assistant container filesystem. With the default settings, Factorio writes `autosave1.zip` through `autosave8.zip` in `/share/factorio/saves` while the server is running.
+
+The Save files ingress page controls the assistant's additional scheduled backups. Backup settings are kept in runtime storage and are deliberately not add-on options in `config.yaml`.
+
+The page supports three schedule modes:
+
+- **Hourly** creates one backup each hour.
+- **Daily at** creates one backup at the selected local time.
+- **Every X hours** creates a backup at the configured interval from the last successful backup.
+
+Backups are enabled by default. The default interval is 12 hours, the default daily time is `00:00`, and the default maximum is 14 backup archives. Set **Max total MB** to `0` to disable the combined-size limit. When either retention limit is reached, the oldest backup archives are removed first. The count limit is always active and must be at least 1.
+
+The page lists normal saves, Factorio autosaves, and assistant backup archives. A non-configured save can be deleted from the list. Restoring a selected save is asynchronous: the assistant asks the supervisor to stop Factorio, replaces the configured save atomically, and the supervisor starts Factorio again. Follow the restore status indicator in the ingress page until it reports completion. Do not manually edit or remove the configured save while a restore is in progress.
 
 ## Game Data Catalog
 

@@ -1,3 +1,5 @@
+require("prototypes/ui")
+
 local tint = {r = 0.25, g = 0.65, b = 1.0, a = 1.0}
 
 local function tint_main_render(sprites)
@@ -54,7 +56,6 @@ data:extend({
       count = 100,
       ingredients = {
         {"automation-science-pack", 1},
-        {"logistic-science-pack", 1},
       },
       time = 30,
     },

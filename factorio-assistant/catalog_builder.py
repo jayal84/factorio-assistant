@@ -100,7 +100,7 @@ def _flatten_locale(value: object, prefix: str = "", result: dict[str, str] | No
         result.setdefault(prefix, _clean_localized_text(value))
         parts = prefix.split(".")
         for start in range(1, len(parts)):
-            result.setdefault(".".join(parts[start:]), value)
+            result.setdefault(".".join(parts[start:]), _clean_localized_text(value))
     return result
 
 
@@ -129,6 +129,12 @@ def _localized_name(prototype: dict[str, object], name: str, locale: dict[str, o
     translated = _localized_value(prototype, "localised_name", name, locale)
     if translated:
         return translated
+    for domain in ("item-name", "resource-name", "entity-name", "fluid-name"):
+        translated = locale.get(f"{domain}.{name}")
+        if not isinstance(translated, str) and isinstance(locale.get(domain), dict):
+            translated = locale[domain].get(name)
+        if isinstance(translated, str) and translated.strip():
+            return _clean_localized_text(translated)
     value = prototype.get("localised_name") or prototype.get("localized_name")
     if isinstance(value, list) and len(value) > 1:
         return _clean_localized_text(_text(value[1]))

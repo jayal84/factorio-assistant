@@ -118,8 +118,10 @@ class FactorioAssistantService:
         )
         self.discovered_players = set()
         self.discovered_surfaces = set()
+        self._discovered_resource_sites = {}
         self.discovered_combinators = set()
         self.combinator_signals = {}
+        self.combinator_control_signals = {}
         self._combinator_state = {}
         self._combinator_discovery_topics = {}
         self._last_player_positions = {}
@@ -553,6 +555,9 @@ class FactorioAssistantService:
   local game_time = 0
   local difficulty = ""
   local map_settings = ""
+    local day_night_cycle = false
+    local daylight = false
+    local daytime = 0
   local force = nil
   local force_ok, force_value = pcall(function()
     return game.forces["player"]
@@ -639,7 +644,15 @@ class FactorioAssistantService:
     local pollution_ok, pollution_value = pcall(function()
       return map_value.pollution.enabled
     end)
-        map_settings = string.format("enemy_evolution=%s; pollution=%s", tostring(enemy_ok and enemy_value ~= nil and enemy_value or false), tostring(pollution_ok and pollution_value ~= nil and pollution_value or false))
+                local surface = game.surfaces.nauvis
+                if surface then
+                    local freeze_ok, freeze_value = pcall(function() return surface.freeze_daytime end)
+                    local daytime_ok, daytime_value = pcall(function() return surface.daytime end)
+                    day_night_cycle = freeze_ok and freeze_value ~= true or false
+                    daytime = daytime_ok and tonumber(daytime_value) or 0
+                    daylight = daytime_ok and daytime_value ~= nil and (daytime_value <= 0.25 or daytime_value >= 0.75) or false
+                end
+                map_settings = string.format("enemy_evolution=%s; pollution=%s; day_night_cycle=%s; daylight=%s; daytime=%.6f", tostring(enemy_ok and enemy_value ~= nil and enemy_value or false), tostring(pollution_ok and pollution_value ~= nil and pollution_value or false), tostring(day_night_cycle), tostring(daylight), daytime)
   end
   return {
     tick = game_tick,
@@ -664,6 +677,9 @@ class FactorioAssistantService:
     surfaces = surface_metrics,
     difficulty = difficulty,
     map_settings = map_settings,
+    day_night_cycle = day_night_cycle,
+    daylight = daylight,
+    daytime = daytime,
     players = player_rows
   }
 end)
@@ -727,7 +743,6 @@ end'''
                         "players": event["players"],
                         "received_monotonic": time.monotonic(),
                     }
-                continue
             if event["event"] in {"combinator_snapshot", "combinator_reader_changed"}:
                 self._handle_combinator_event(event)
             event["bridge_received_at"] = datetime.now(timezone.utc).isoformat()
@@ -775,11 +790,24 @@ end'''
         signal_type = str(signal.get("type") or "virtual")
         name = str(signal.get("name") or "signal")
         quality = str(signal.get("quality") or "normal")
-        return f"{signal_type}_{name}_{quality}"
+        network = str(signal.get("network") or "unknown")
+        return f"{network}_{signal_type}_{name}_{quality}"
 
     def _combinator_signal_display_name(self, signal):
         name = self._localized_signal_name(signal)
-        return name if signal.get("quality", "normal") == "normal" else f"{name} ({signal['quality']})"
+        network = str(signal.get("network") or "unknown").capitalize()
+        display_name = f"{name} ({network})"
+        return display_name if signal.get("quality", "normal") == "normal" else f"{display_name} ({signal['quality']})"
+
+    def _combinator_control_slots(self):
+        return (("red", "Red"), ("green", "Green"))
+
+    def _combinator_control_names(self):
+        return tuple(
+            (network, label, slot)
+            for network, label in self._combinator_control_slots()
+            for slot in "ABCD"
+        )
 
     def _localized_signal_name(self, signal):
         """Resolve signal labels from the boot-generated Factorio catalog."""
@@ -803,6 +831,9 @@ end'''
             pass
         return name.replace("-", " ").title()
 
+    def _localized_signal_slot_name(self, slot):
+        return self._localized_signal_name({"type": "virtual", "name": f"signal-{slot}"})
+
     def _handle_combinator_event(self, event):
         unit_number = str(event.get("unit_number") or "").strip()
         if not unit_number:
@@ -816,10 +847,60 @@ end'''
                 self.mqtt_client.publish(topic, "", retain=True)
                 self.mqtt_client.publish(f"{topic}/attributes", "", retain=True)
                 self._combinator_state.pop(topic, None)
+            for network, _, slot in self._combinator_control_names():
+                topic = f"{self.mqtt_prefix}/combinators/{unit_number}/control_signals/{network}/{slot}"
+                self.mqtt_client.publish(topic, "", retain=True)
+                self.mqtt_client.publish(f"{topic}/attributes", "", retain=True)
+                self._combinator_state.pop(topic, None)
+                input_topic = f"{self.mqtt_prefix}/combinators/{unit_number}/input_signals/{network}/{slot}"
+                self.mqtt_client.publish(input_topic, "", retain=True)
+                self.mqtt_client.publish(f"{input_topic}/attributes", "", retain=True)
+                self._combinator_state.pop(input_topic, None)
+            self.combinator_control_signals.pop(unit_number, None)
             self._publish_combinator_availability(unit_number, "offline")
             self.discovered_combinators.discard(unit_number)
             return
         self._publish_combinator_discovery(event)
+        control_signals = event.get("control_signals", {})
+        if not isinstance(control_signals, dict):
+            control_signals = {}
+        current_controls = {}
+        for network, _, slot in self._combinator_control_names():
+            try:
+                value = int(control_signals.get(network, {}).get(slot, 0))
+            except (TypeError, ValueError):
+                value = 0
+            current_controls[f"{network}_{slot}"] = value
+            topic = f"{self.mqtt_prefix}/combinators/{unit_number}/control_signals/{network}/{slot}"
+            if self._combinator_state.get(topic) != value:
+                self.mqtt_client.publish(topic, str(value), retain=True)
+                self._combinator_state[topic] = value
+            self.mqtt_client.publish(
+                f"{topic}/attributes",
+                json.dumps({
+                    "Signal": f"{network}-signal-{slot}",
+                    "Wire network": network,
+                    "Signal slot": slot,
+                    "Factorio unit number": unit_number,
+                    "Surface": event.get("surface", "unknown"),
+                    "Position": event.get("position", {}),
+                    "Source": "MOD",
+                }, separators=(",", ":")),
+                retain=True,
+            )
+        self.combinator_control_signals[unit_number] = current_controls
+        input_signals = event.get("input_signals", {})
+        if not isinstance(input_signals, dict):
+            input_signals = {}
+        for network, _, slot in self._combinator_control_names():
+            try:
+                value = int(input_signals.get(network, {}).get(slot, 0))
+            except (TypeError, ValueError):
+                value = 0
+            topic = f"{self.mqtt_prefix}/combinators/{unit_number}/input_signals/{network}/{slot}"
+            if self._combinator_state.get(topic) != value:
+                self.mqtt_client.publish(topic, str(value), retain=True)
+                self._combinator_state[topic] = value
         current = {}
         for signal in event.get("signals", []) or []:
             if not isinstance(signal, dict) or not signal.get("name"):
@@ -835,6 +916,7 @@ end'''
                 "Signal": signal.get("name"),
                 "Signal type": signal.get("type", "virtual"),
                 "Quality": signal.get("quality", "normal"),
+                "Network": signal.get("network", "unknown"),
                 "Placed by": event.get("placed_by", ""),
                 "Surface": event.get("surface", "unknown"),
                 "Position": event.get("position", {}),
@@ -896,6 +978,53 @@ end'''
             discovery_topic = f"{self.mqtt_prefix}/sensor/{device_id}/{object_id}/config"
             self.mqtt_client.publish(discovery_topic, json.dumps(config), retain=True)
             self._combinator_discovery_topics.setdefault(unit_number, set()).add(discovery_topic)
+        for network, label, slot in self._combinator_control_names():
+            object_id = f"factorio_combinator_{unit_number}_{network}_input_{slot.lower()}"
+            config = {
+                "name": f"{self._localized_signal_slot_name(slot)} ({label}) Input",
+                "object_id": object_id,
+                "unique_id": object_id,
+                "state_topic": f"{self.mqtt_prefix}/combinators/{unit_number}/input_signals/{network}/{slot}",
+                "state_class": "measurement",
+                "icon": "mdi:transit-connection-variant",
+                "device": device,
+                "availability": [
+                    {"topic": self._bridge_availability_topic()},
+                    {"topic": self._rcon_availability_topic()},
+                    {"topic": f"{self.mqtt_prefix}/combinators/{unit_number}/availability"},
+                ],
+                "availability_mode": "all",
+            }
+            discovery_topic = f"{self.mqtt_prefix}/sensor/{device_id}/{object_id}/config"
+            self.mqtt_client.publish(discovery_topic, json.dumps(config), retain=True)
+            self._combinator_discovery_topics.setdefault(unit_number, set()).add(discovery_topic)
+        for network, label, slot in self._combinator_control_names():
+            object_id = f"factorio_combinator_{unit_number}_{network}_signal_{slot.lower()}"
+            command_topic = f"{self.mqtt_prefix}/control/combinator/{unit_number}/{network}/signal/{slot}/set"
+            config = {
+                "name": f"{label} Signal {slot}",
+                "object_id": object_id,
+                "unique_id": object_id,
+                "state_topic": f"{self.mqtt_prefix}/combinators/{unit_number}/control_signals/{network}/{slot}",
+                "command_topic": command_topic,
+                "json_attributes_topic": f"{self.mqtt_prefix}/combinators/{unit_number}/control_signals/{network}/{slot}/attributes",
+                "min": -2147483648,
+                "max": 2147483647,
+                "step": 1,
+                "mode": "box",
+                "icon": "mdi:resistor-nodes",
+                "device": device,
+                "availability": [
+                    {"topic": self._bridge_availability_topic()},
+                    {"topic": self._rcon_availability_topic()},
+                    {"topic": f"{self.mqtt_prefix}/combinators/{unit_number}/availability"},
+                ],
+                "availability_mode": "all",
+            }
+            discovery_topic = f"{self.mqtt_prefix}/number/{device_id}/{object_id}/config"
+            self.mqtt_client.publish(discovery_topic, json.dumps(config), retain=True)
+            self._combinator_discovery_topics.setdefault(unit_number, set()).add(discovery_topic)
+            self._entity_command_topics[command_topic] = command_topic
         self.discovered_combinators.add(unit_number)
 
     def read_mod_stats(self, max_age=45):
@@ -967,6 +1096,40 @@ end'''
         """Resolve a Factorio localization key while preserving missing values."""
         return ""
 
+    def _localized_resource_name(self, name):
+        """Resolve a resource ID from the generated Factorio catalog."""
+        resource_name = str(name or "").strip()
+        if not resource_name:
+            return "Resource"
+        known_names = {
+            "angels-ore1": "Saphirite",
+            "angels-ore2": "Jivolite",
+            "angels-ore3": "Stiratite",
+            "angels-ore4": "Crotinnium",
+            "angels-ore5": "Rubyte",
+            "angels-ore6": "Bobmonium",
+        }
+        if resource_name in known_names:
+            return known_names[resource_name]
+        try:
+            cache = getattr(self, "_resource_catalog", None)
+            if cache is None:
+                catalog = json.loads(Path("/tmp/factorio-assistant/catalog.json").read_text(encoding="utf-8"))
+                cache = {
+                    str(record.get("name")): str(record.get("localized_name"))
+                    for record in catalog.get("records", [])
+                    if isinstance(record, dict)
+                    and record.get("kind") == "resource"
+                    and record.get("localized_name")
+                }
+                self._resource_catalog = cache
+            localized = cache.get(resource_name)
+            if localized and localized != resource_name:
+                return localized
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+        return resource_name
+
     def _research_attributes(self, world):
         """Build localized attributes for the current research and research queue."""
         research_id = str(world.get("research", "") or "")
@@ -1012,6 +1175,9 @@ end'''
         command = self.build_stats_command()
         log_trace("Querying Factorio server state over RCON")
         payload = self.rcon_client.send_command(command)
+        if payload and "Using Lua console commands will disable achievements" in payload:
+            log_notice("Factorio requested confirmation for Lua telemetry; retrying the stats command")
+            payload = self.rcon_client.send_command(command)
         if not payload:
             log_trace("No RCON response received for Factorio state query")
             return None
@@ -1080,6 +1246,7 @@ end'''
                         "active_entity_count": 0,
                         "difficulty": "",
                         "map_settings": "",
+                        "daytime": 0.0,
                         "surfaces": {},
                     }
 
@@ -1147,6 +1314,17 @@ end'''
                                 "map_settings": world_candidate[11] if len(world_candidate) > 11 else "",
                                 "surfaces": {},
                             }
+                            for setting_name in ("day_night_cycle", "daylight"):
+                                setting_match = re.search(
+                                    rf"(?:^|;\s*){setting_name}=(true|false)",
+                                    world_data["map_settings"],
+                                    re.IGNORECASE,
+                                )
+                                if setting_match:
+                                    world_data[setting_name] = setting_match.group(1).lower() == "true"
+                            daytime_match = re.search(r"(?:^|;\s*)daytime=([0-9]+(?:\.[0-9]+)?)", world_data["map_settings"], re.IGNORECASE)
+                            if daytime_match:
+                                world_data["daytime"] = _coerce_float(daytime_match.group(1))
                         except ValueError as exc:
                             logger.warning(f"Failed to parse world fields in plain-text RCON payload: {exc}")
 
@@ -1204,6 +1382,7 @@ end'''
                                     "connected": connected,
                                 },
                                 "surface": surface,
+                                "health": current_health,
                                 "current_health": current_health,
                                 "max_health": max_health,
                                 "health_percent": health_percent,
@@ -1346,6 +1525,7 @@ end'''
             logger.info("Connected to MQTT broker successfully.")
             log_trace(f"MQTT connect success: host={self.mqtt_host}:{self.mqtt_port}, user={self.mqtt_user or '<anonymous>'}, flags={flags}")
             client.subscribe(f"{getattr(self, 'mqtt_prefix', 'homeassistant')}/+/+/+/set")
+            client.subscribe(f"{getattr(self, 'mqtt_prefix', 'homeassistant')}/control/combinator/+/+/signal/+/set")
             log_trace(f"MQTT subscribed to entity command topics {getattr(self, 'mqtt_prefix', 'homeassistant')}/+/+/+/set")
             client.publish(self._bridge_availability_topic(), "online", retain=True)
             log_trace(f"MQTT published availability topic {self._bridge_availability_topic()}=online")
@@ -1380,6 +1560,69 @@ end'''
         command_topic = f"{self.mqtt_prefix}/control/{control_name}/set"
         if internal_topic != command_topic:
             logger.warning(f"Unknown MQTT control topic: {msg.topic}")
+            return
+
+        combinator_match = re.fullmatch(r"combinator/([^/]+)/(red|green)/signal/([A-D])", control_name)
+        if combinator_match:
+            unit_number, network, slot = combinator_match.groups()
+            try:
+                value = float(payload)
+            except (TypeError, ValueError):
+                logger.warning(f"Invalid combinator signal payload: {payload!r}; expected an integer")
+                return
+            if not value.is_integer() or value < -2147483648 or value > 2147483647:
+                logger.warning(f"Invalid combinator signal payload: {payload!r}; expected a signed 32-bit integer")
+                return
+            result = self.call_mod_command("set_combinator_signal", unit_number, network, slot, int(value))
+            if not result or not result.get("ok"):
+                logger.error(f"Failed to set combinator {unit_number} signal {slot}: {result}")
+                return
+            state_topic = f"{self.mqtt_prefix}/combinators/{unit_number}/control_signals/{network}/{slot}"
+            self._publish_if_changed(state_topic, int(value), source="MOD")
+            self.mqtt_client.publish(
+                f"{state_topic}/attributes",
+                json.dumps({"Signal": f"{network}-signal-{slot}", "Signal slot": slot, "Wire network": network, "Source": "MOD"}, separators=(",", ":")),
+                retain=True,
+            )
+            logger.info(f"Set combinator {unit_number} signal {slot} to {int(value)} through MOD")
+            return
+
+        if control_name == "day_night_cycle_resume":
+            if payload.upper() not in {"PRESS", "ON", "TRUE", "1"}:
+                logger.warning(f"Invalid day/night cycle button payload: {payload!r}; expected PRESS")
+                return
+            success, source, result = self.execute_mod_control(
+                "set_day_night_cycle",
+                (True,),
+                "/silent-command for _, surface in pairs(game.surfaces or {}) do surface.freeze_daytime = false end",
+            )
+            if success:
+                self._publish_if_changed(f"{self.mqtt_prefix}/settings/day_night_cycle", "ON", source=source)
+                self._publish_source_attribute(f"{self.mqtt_prefix}/settings/day_night_cycle", source)
+                logger.info("Resumed the Factorio day/night cycle through %s", source)
+            else:
+                logger.error("Failed to resume the Factorio day/night cycle")
+            return
+
+        if control_name == "daytime":
+            try:
+                daytime = float(payload)
+            except (TypeError, ValueError):
+                logger.warning(f"Invalid daytime payload: {payload!r}; expected 0 through 1")
+                return
+            if not 0 <= daytime <= 1:
+                logger.warning(f"Invalid daytime payload: {payload!r}; expected 0 through 1")
+                return
+            success, source, result = self.execute_mod_control(
+                "set_daytime",
+                (daytime,),
+                f"/silent-command for _, surface in pairs(game.surfaces or {{}}) do surface.daytime = {daytime:g} end",
+            )
+            if success:
+                self._publish_if_changed(f"{self.mqtt_prefix}/world/daytime", daytime, source=source)
+                logger.info("Set Factorio time of day to %.3f through %s", daytime, source)
+            else:
+                logger.error("Failed to set Factorio time of day to %.3f", daytime)
             return
 
         if control_name == "save":
@@ -1458,8 +1701,9 @@ end'''
             return
 
         switch_commands = {
-            "enemy_evolution": "game.map_settings.enemy_evolution.enabled",
-            "pollution": "game.map_settings.pollution.enabled",
+            "enemy_evolution": ("set_map_setting", "game.map_settings.enemy_evolution.enabled"),
+            "pollution": ("set_map_setting", "game.map_settings.pollution.enabled"),
+            "daylight": ("set_daylight", "game.surfaces.nauvis.daytime <= 0.25 or game.surfaces.nauvis.daytime >= 0.75"),
         }
         if control_name not in switch_commands:
             logger.warning(f"Unknown MQTT control topic: {msg.topic}")
@@ -1471,13 +1715,13 @@ end'''
             return
 
         enabled = normalized_payload in {"ON", "TRUE", "1"}
-        setting_path = switch_commands[control_name]
-        command = f"/silent-command {setting_path} = {'true' if enabled else 'false'}; rcon.print('{control_name}=' .. tostring({setting_path}))"
-        success, source, result = self.execute_mod_control(
-            "set_map_setting",
-            (control_name, enabled),
-            command,
-        )
+        method, setting_path = switch_commands[control_name]
+        if control_name == "daylight":
+            command = f"/silent-command for _, surface in pairs(game.surfaces or {{}}) do surface.daytime = {'0' if enabled else '0.5'}; surface.freeze_daytime = true end; rcon.print('{control_name}=' .. tostring(game.surfaces.nauvis.daytime <= 0.25 or game.surfaces.nauvis.daytime >= 0.75))"
+        else:
+            command = f"/silent-command {setting_path} = {'true' if enabled else 'false'}; rcon.print('{control_name}=' .. tostring({setting_path}))"
+        arguments = (control_name, enabled) if method == "set_map_setting" else (enabled,)
+        success, source, result = self.execute_mod_control(method, arguments, command)
         if not success:
             logger.error(f"Failed to apply Factorio control {control_name}={enabled}")
             return
@@ -1649,6 +1893,7 @@ end'''
         # Rebuild dynamic registrations on every reconnect because the topic
         # maps below are reset before retained discovery is republished.
         self.discovered_surfaces = set()
+        self._discovered_resource_sites = {}
         self.discovered_players = set()
         self.known_players = getattr(self, "known_players", {})
         self._last_stats = getattr(self, "_last_stats", None)
@@ -1837,6 +2082,17 @@ end'''
                 "icon": "mdi:pause-circle-outline",
                 "component": "switch",
             },
+            {
+                "object_id": "factorio_server_daylight",
+                "name": "Daylight",
+                "unique_id": "factorio_server_daylight",
+                "state_topic": f"{self.mqtt_prefix}/settings/daylight",
+                "command_topic": f"{self.mqtt_prefix}/control/daylight/set",
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "icon": "mdi:white-balance-sunny",
+                "component": "switch",
+            },
         ]
 
         server_buttons: list[dict[str, Any]] = [
@@ -1847,6 +2103,15 @@ end'''
                 "command_topic": f"{self.mqtt_prefix}/control/save/set",
                 "payload_press": "PRESS",
                 "icon": "mdi:content-save-outline",
+                "component": "button",
+            },
+            {
+                "object_id": "factorio_server_day_night_cycle_resume",
+                "name": "Resume Day/Night Cycle",
+                "unique_id": "factorio_server_day_night_cycle_resume",
+                "command_topic": f"{self.mqtt_prefix}/control/day_night_cycle_resume/set",
+                "payload_press": "PRESS",
+                "icon": "mdi:weather-sunny-clock",
                 "component": "button",
             },
         ]
@@ -1863,6 +2128,19 @@ end'''
                 "step": 0.1,
                 "mode": "slider",
                 "icon": "mdi:speedometer-medium",
+                "component": "number",
+            },
+            {
+                "object_id": "factorio_server_time_of_day",
+                "name": "Time of Day",
+                "unique_id": "factorio_server_time_of_day",
+                "state_topic": f"{self.mqtt_prefix}/world/daytime",
+                "command_topic": f"{self.mqtt_prefix}/control/daytime/set",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.01,
+                "mode": "slider",
+                "icon": "mdi:weather-sunny",
                 "component": "number",
             },
         ]
@@ -2123,10 +2401,12 @@ end'''
             self._register_entity_attributes(control, object_id, component, "factorio_server")
             discovery_topic = f"{self.mqtt_prefix}/{component}/factorio_server/{object_id}/config"
             control["device"] = server_device
-            control["availability"] = [
+            base_availability = [
                 {"topic": self._bridge_availability_topic()},
                 {"topic": self._rcon_availability_topic()},
             ]
+            custom_availability = control.get("availability", [])
+            control["availability"] = base_availability + (custom_availability if isinstance(custom_availability, list) else [])
             control["availability_mode"] = "all"
             payload = json.dumps(control)
             log_trace(f"Publishing server {component} discovery payload to {discovery_topic}: {payload}")
@@ -2167,6 +2447,7 @@ end'''
 
         legacy_topics = [
             f"{self.mqtt_prefix}/sensor/factorio_world/factorio_world_active_entities/config",
+            f"{self.mqtt_prefix}/switch/factorio_server/factorio_server_day_night_cycle/config",
         ]
         for surface_name in surface_names:
             safe_surface = self._sanitize_discovery_value(surface_name)
@@ -2243,6 +2524,94 @@ end'''
                 log_trace(f"Published surface discovery config to {discovery_topic}")
 
             self.discovered_surfaces.add(surface_name)
+
+    def publish_pinned_resource_discovery(self, surface_name, resources):
+        """Publish separate Home Assistant sensors for each pinned DQOL site."""
+        if not isinstance(resources, list):
+            resources = []
+        safe_surface = self._sanitize_discovery_value(surface_name)
+        device_id = f"factorio_resource_monitor_{safe_surface}"
+        device = {
+            "identifiers": [device_id],
+            "name": f"Factorio Resource Monitor: {str(surface_name).replace('_', ' ').title()}",
+            "model": "Pinned Resource Sites",
+            "manufacturer": "Factorio Assistant",
+            "via_device": "factorio_space_age_server",
+        }
+        current_ids = set()
+        for resource in resources:
+            if not isinstance(resource, dict) or resource.get("id") is None:
+                continue
+            site_id = str(resource["id"])
+            safe_site = self._sanitize_discovery_value(site_id)
+            resource_prefix = f"{self.mqtt_prefix}/resource_monitor/{surface_name}/{site_id}"
+            display_name = str(resource.get("name") or resource.get("type") or site_id)
+            ore_type = resource.get("type_name") or resource.get("type", "")
+            if isinstance(ore_type, (list, tuple)) or str(ore_type).startswith("entity-name"):
+                ore_type = ""
+            if not isinstance(ore_type, str) or not ore_type.strip():
+                ore_type = resource.get("type", "")
+            ore_type = self._localized_resource_name(resource.get("type") or ore_type)
+            position = resource.get("position", {}) or {}
+            location = f"{surface_name} ({position.get('x', 0)}, {position.get('y', 0)})"
+            attributes = {
+                "Site": display_name,
+                "Ore type": ore_type,
+                "Resource ID": resource.get("type", ""),
+                "Initial amount": resource.get("initial_amount", 0),
+                "Amount": resource.get("amount", 0),
+                "Rate": resource.get("rate", 0),
+                "Estimated depletion": None if resource.get("estimated_depletion") is None else float(resource["estimated_depletion"]) / 60,
+                "Position": position,
+                "Location": location,
+                "Source": "MOD",
+            }
+            for metric in ("amount", "ore_type", "percent_remaining", "location", "estimated_depletion", "rate"):
+                legacy_object_id = f"factorio_resource_{safe_surface}_{safe_site}_{metric}"
+                legacy_discovery_topic = f"{self.mqtt_prefix}/sensor/{device_id}/{legacy_object_id}/config"
+                self.mqtt_client.publish(legacy_discovery_topic, "", retain=True)
+            object_id = f"factorio_resource_{safe_surface}_{safe_site}"
+            state_topic = f"{resource_prefix}/percent_remaining"
+            config = {
+                "name": f"{display_name} % Remaining",
+                "object_id": object_id,
+                "unique_id": object_id,
+                "state_topic": state_topic,
+                "json_attributes_topic": f"{resource_prefix}/attributes",
+                "unit_of_measurement": "%",
+                "state_class": "measurement",
+                "icon": "mdi:percent",
+                "device": device,
+                "availability": [
+                    {"topic": self._bridge_availability_topic()},
+                    {"topic": self._rcon_availability_topic()},
+                ],
+                "availability_mode": "all",
+            }
+            discovery_topic = f"{self.mqtt_prefix}/sensor/{device_id}/{object_id}/config"
+            self.mqtt_client.publish(discovery_topic, json.dumps(config), retain=True)
+            self._entity_state_topics[state_topic] = state_topic
+            self.mqtt_client.publish(state_topic, str(float(resource.get("percent", 0) or 0) * 100), retain=True)
+            attributes_topic = f"{resource_prefix}/attributes"
+            self.mqtt_client.publish(attributes_topic, json.dumps(attributes, separators=(",", ":")), retain=True)
+            current_ids.add(site_id)
+
+        previous_ids = self._discovered_resource_sites.get(surface_name, set())
+        for site_id in previous_ids - current_ids:
+            safe_site = self._sanitize_discovery_value(site_id)
+            resource_prefix = f"{self.mqtt_prefix}/resource_monitor/{surface_name}/{site_id}"
+            for metric in ("amount", "ore_type", "percent_remaining", "location", "estimated_depletion", "rate"):
+                object_id = f"factorio_resource_{safe_surface}_{safe_site}_{metric}"
+                discovery_topic = f"{self.mqtt_prefix}/sensor/{device_id}/{object_id}/config"
+                self.mqtt_client.publish(discovery_topic, "", retain=True)
+                state_topic = f"{resource_prefix}/{metric}"
+                self.mqtt_client.publish(state_topic, "", retain=True)
+                self._entity_state_topics.pop(state_topic, None)
+            object_id = f"factorio_resource_{safe_surface}_{safe_site}"
+            self.mqtt_client.publish(f"{self.mqtt_prefix}/sensor/{device_id}/{object_id}/config", "", retain=True)
+            self._entity_state_topics.pop(f"{resource_prefix}/percent_remaining", None)
+            self.mqtt_client.publish(f"{resource_prefix}/attributes", "", retain=True)
+        self._discovered_resource_sites[surface_name] = current_ids
 
     def publish_player_discovery(self, username):
         """Publish discovery config for one player."""
@@ -2414,6 +2783,7 @@ end'''
             if not public_topics and (
                 topic.endswith("/availability")
                 or topic == self._rcon_availability_topic()
+                or topic == f"{self.mqtt_prefix}/settings/day_night_cycle"
             ):
                 public_topics = {topic}
             if not public_topics:
@@ -2558,6 +2928,8 @@ end'''
                     log_trace(f"Published telemetry topic {self.mqtt_prefix}/world/players_online={server.get('players_online', 0)}")
 
                     world = stats.get("world", {})
+                    if world.get("daytime") is not None:
+                        self._publish_if_changed(f"{self.mqtt_prefix}/world/daytime", float(world.get("daytime", 0.0) or 0.0))
                     research_attributes = self._research_attributes(world)
                     research_state = research_attributes.get("localized_name") or research_attributes.get("id") or "None"
                     queue_records = research_attributes.get("queue", [])
@@ -2591,6 +2963,11 @@ end'''
                     if isinstance(surfaces, dict):
                         self.publish_surface_discovery(list(surfaces.keys()))
                         for surface_name, surface_data in surfaces.items():
+                            if isinstance(surface_data, dict):
+                                self.publish_pinned_resource_discovery(
+                                    surface_name,
+                                    surface_data.get("pinned_resources", []),
+                                )
                             surface_topic_base = f"{self.mqtt_prefix}/world/surfaces/{surface_name}"
                             self._publish_if_changed(f"{surface_topic_base}/pollution", float(surface_data.get("pollution", 0.0)))
 
@@ -2754,6 +3131,12 @@ end'''
                     server = stats.get("server", {}) or {}
                     self._publish_if_changed(f"{self.mqtt_prefix}/world/game_day", world.get("game_day", 0))
                     self._publish_if_changed(f"{self.mqtt_prefix}/world/game_time", world.get("game_time", ""))
+                    daytime = world.get("daytime")
+                    if daytime is None:
+                        daytime_match = re.search(r"(?:^|;\s*)daytime=([0-9]+(?:\.[0-9]+)?)", str(world.get("map_settings", "")), re.IGNORECASE)
+                        daytime = float(daytime_match.group(1)) if daytime_match else None
+                    if daytime is not None:
+                        self._publish_if_changed(f"{self.mqtt_prefix}/world/daytime", float(daytime))
                     self._publish_if_changed(f"{self.mqtt_prefix}/world/surface_count", world.get("surface_count", 0))
                     self._publish_if_changed(f"{self.mqtt_prefix}/world/surface_names", world.get("surface_names", ""))
                     surfaces = world.get("surfaces", {}) or {}
@@ -2772,13 +3155,16 @@ end'''
                     difficulty = str(world.get("difficulty", server.get("difficulty", "")) or "unknown")
                     self._publish_if_changed(f"{self.mqtt_prefix}/server/difficulty", difficulty)
                     map_settings = str(world.get("map_settings", server.get("map_settings", "")))
-                    for setting_name in ("enemy_evolution", "pollution"):
-                        setting_match = re.search(rf"(?:^|;\s*){setting_name}=(true|false)", map_settings, re.IGNORECASE)
-                        if setting_match:
-                            setting_state = "ON" if setting_match.group(1).lower() == "true" else "OFF"
+                    for setting_name in ("enemy_evolution", "pollution", "day_night_cycle", "daylight"):
+                        setting_value = world.get(setting_name)
+                        if setting_value is None:
+                            setting_match = re.search(rf"(?:^|;\s*){setting_name}=(true|false)", map_settings, re.IGNORECASE)
+                            if setting_match:
+                                setting_value = setting_match.group(1).lower() == "true"
+                        if setting_value is not None:
                             self._publish_if_changed(
                                 f"{self.mqtt_prefix}/settings/{setting_name}",
-                                setting_state,
+                                "ON" if bool(setting_value) else "OFF",
                             )
 
                 diagnostics = self._collect_server_diagnostics()
@@ -2900,6 +3286,11 @@ end'''
                     "Source": "RCON diagnostics",
                 })
             self._publish_entity_attributes(self._watchdog_attributes_topic(), attributes_payload)
+            try:
+                snapshot_path = self.runtime_dir / "watchdog_snapshot.json"
+                snapshot_path.write_text(attributes_payload, encoding="utf-8")
+            except OSError:
+                pass
 
         while self.running:
             try:

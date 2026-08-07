@@ -1,7 +1,7 @@
 name: "Factorio Assistant"
 description: "Factorio Space Age server assistant for Home Assistant with MQTT telemetry, RCON controls, and automated mod updates."
 url: "https://github.com/jayal84/factorio-assistant"
-version: "0.1.8"
+version: "0.2.2"
 slug: "factorio_assistant"
 arch:
   - amd64
@@ -25,7 +25,7 @@ options:
   factorio_user: ""
   factorio_token: ""
   enable_mod_updates: false
-  enable_telemetry_mod: false
+  enable_telemetry_mod: true
   mqtt_prefix: "homeassistant"
   mqtt_host: "core-mosquitto"
   mqtt_port: 1883

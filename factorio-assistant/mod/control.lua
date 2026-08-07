@@ -7,6 +7,10 @@ local last_death_tick = {}
 local reader_name = "factorio-assistant-combinator"
 local telemetry_heartbeat_ticks = 60
 local last_reader_error_tick = {}
+local reader_signal_networks = {"red", "green"}
+local reader_signal_slots = {"A", "B", "C", "D"}
+
+require("resource_monitor")
 
 local function setting_value(name, default)
   local setting = settings.global[name]
@@ -62,11 +66,77 @@ local function position_data(position)
   return {x = position.x, y = position.y}
 end
 
+local function pinned_resource_sites(surface)
+  local result = {}
+  local sites = storage.sites and storage.sites.surfaces and storage.sites.surfaces[surface.index]
+  if type(sites) ~= "table" then return result end
+  for resource_type, site_list in pairs(sites) do
+    if type(site_list) == "table" then
+      for _, site in pairs(site_list) do
+        if type(site) == "table" and site.pinned == true and site.archived ~= true then
+          local calculated = site.calculated or {}
+          local resource_name = site.type or resource_type
+          local type_name = resource_name
+          local resource_data = Resources and Resources.types and Resources.types[resource_name]
+          if resource_data and type(resource_data.translated_name) == "string" then
+            type_name = resource_data.translated_name
+          end
+          table.insert(result, {
+            id = site.id,
+            name = site.name or resource_type,
+            type = resource_name,
+            type_name = type_name,
+            initial_amount = site.initial_amount or 0,
+            amount = calculated.amount or 0,
+            percent = calculated.percent or 0,
+            rate = calculated.rate or 0,
+            estimated_depletion = calculated.estimated_depletion,
+            position = {x = site.area and site.area.x or 0, y = site.area and site.area.y or 0},
+          })
+        end
+      end
+    end
+  end
+  table.sort(result, function(left, right) return tostring(left.id) < tostring(right.id) end)
+  return result
+end
+
+script.on_init(function(event)
+  dqol_on_init(event)
+end)
+
+script.on_load(function(event)
+  dqol_on_load(event)
+end)
+
+script.on_configuration_changed(function(event)
+  dqol_on_configuration_changed(event)
+end)
+
+script.on_event(defines.events.on_player_created, function(event)
+  dqol_on_player_created(event)
+end)
+
 local function reader_signal_key(signal)
   return table.concat({signal.type or "", signal.name or "", signal.quality or "normal"}, ":")
 end
 
-local function read_reader_network(entity, connector_id, signals)
+local function reader_control_signals(unit_number)
+  local all_signals = storage.factorio_assistant_combinator_signals or {}
+  storage.factorio_assistant_combinator_signals = all_signals
+  local values = all_signals[unit_number] or {}
+  all_signals[unit_number] = values
+  local result = {}
+  for _, network in ipairs(reader_signal_networks) do
+    result[network] = {}
+    for _, slot in ipairs(reader_signal_slots) do
+      result[network][slot] = values[network] and values[network][slot] or 0
+    end
+  end
+  return result
+end
+
+local function read_reader_network(entity, connector_id, wire_name, signals, input_signals)
   local ok, network_signals = pcall(function()
     return entity.get_signals(connector_id)
   end)
@@ -81,34 +151,35 @@ local function read_reader_network(entity, connector_id, signals)
   if not network_signals then return end
   for _, entry in pairs(network_signals) do
     if entry.signal and entry.signal.name and entry.count then
-      local key = reader_signal_key(entry.signal)
-      local current = signals[key]
-      if current then
-        current.count = current.count + entry.count
-      else
-        signals[key] = {
-          type = entry.signal.type or "virtual",
-          name = entry.signal.name,
-          quality = entry.signal.quality or "normal",
-          count = entry.count,
-        }
+      local signal_slot = string.match(entry.signal.name, "^signal%-([A-D])$")
+      if entry.signal.type == "virtual" and signal_slot then
+        input_signals[wire_name][signal_slot] = input_signals[wire_name][signal_slot] + entry.count
       end
+      local key = reader_signal_key(entry.signal)
+      signals[wire_name .. ":" .. key] = {
+        type = entry.signal.type or "virtual",
+        name = entry.signal.name,
+        quality = entry.signal.quality or "normal",
+        network = wire_name,
+        count = entry.count,
+      }
     end
   end
 end
 
 local function reader_snapshot(entity)
   local signals = {}
+  local input_signals = {red = {A = 0, B = 0, C = 0, D = 0}, green = {A = 0, B = 0, C = 0, D = 0}}
   if setting_value("factorio-assistant-read-red-wire", true) == true then
-    read_reader_network(entity, defines.wire_connector_id.combinator_input_red, signals)
+    read_reader_network(entity, defines.wire_connector_id.combinator_input_red, "red", signals, input_signals)
   end
   if setting_value("factorio-assistant-read-green-wire", true) == true then
-    read_reader_network(entity, defines.wire_connector_id.combinator_input_green, signals)
+    read_reader_network(entity, defines.wire_connector_id.combinator_input_green, "green", signals, input_signals)
   end
   local signal_list = {}
   for _, signal in pairs(signals) do table.insert(signal_list, signal) end
   table.sort(signal_list, function(left, right)
-    return (left.type .. ":" .. left.name .. ":" .. left.quality) < (right.type .. ":" .. right.name .. ":" .. right.quality)
+    return (left.network .. ":" .. left.type .. ":" .. left.name .. ":" .. left.quality) < (right.network .. ":" .. right.type .. ":" .. right.name .. ":" .. right.quality)
   end)
   local max_signals = math.max(1, math.floor(tonumber(setting_value("factorio-assistant-max-combinator-signals", 100)) or 100))
   while #signal_list > max_signals do table.remove(signal_list) end
@@ -131,6 +202,8 @@ local function reader_snapshot(entity)
     position = position_data(entity.position),
     name = description,
     placed_by = placed_by,
+    input_signals = input_signals,
+    control_signals = reader_control_signals(entity.unit_number),
     signals = signal_list,
     tick = game.tick,
   }
@@ -152,6 +225,53 @@ remote.add_interface("factorio_assistant", {
     end
     game.print(message)
     return command_success(message)
+  end,
+
+  set_combinator_signal = function(unit_number, network, slot, value)
+    unit_number = tonumber(unit_number)
+    network = type(network) == "string" and string.lower(network) or ""
+    slot = type(slot) == "string" and string.upper(slot) or ""
+    value = tonumber(value)
+    if not unit_number or unit_number % 1 ~= 0 then
+      return command_failure("unit number must be an integer")
+    end
+    local valid_network = false
+    for _, name in ipairs(reader_signal_networks) do
+      if name == network then valid_network = true break end
+    end
+    if not valid_network then
+      return command_failure("network must be red or green")
+    end
+    local valid_slot = false
+    for _, name in ipairs(reader_signal_slots) do
+      if name == slot then valid_slot = true break end
+    end
+    if not valid_slot then
+      return command_failure("slot must be one of A through D")
+    end
+    if not value or value % 1 ~= 0 or value < -2147483648 or value > 2147483647 then
+      return command_failure("value must be an integer between -2147483648 and 2147483647")
+    end
+
+    local entity = nil
+    for _, surface in pairs(game.surfaces or {}) do
+      for _, candidate in pairs(surface.find_entities_filtered({name = reader_name})) do
+        if candidate.valid and candidate.unit_number == unit_number then
+          entity = candidate
+          break
+        end
+      end
+      if entity then break end
+    end
+    if not entity then return command_failure("combinator_not_found") end
+
+    local all_signals = storage.factorio_assistant_combinator_signals or {}
+    storage.factorio_assistant_combinator_signals = all_signals
+    local values = all_signals[unit_number] or {}
+    all_signals[unit_number] = values
+    values[network] = values[network] or {}
+    values[network][slot] = value
+    return command_success({unit_number = unit_number, network = network, slot = slot, value = value})
   end,
 
   set_game_speed = function(speed)
@@ -183,6 +303,38 @@ remote.add_interface("factorio_assistant", {
     return command_success(enabled)
   end,
 
+  set_day_night_cycle = function(enabled)
+    if type(enabled) ~= "boolean" then
+      return command_failure("enabled must be a boolean")
+    end
+    for _, surface in pairs(game.surfaces or {}) do
+      surface.freeze_daytime = not enabled
+    end
+    return command_success(enabled)
+  end,
+
+  set_daylight = function(enabled)
+    if type(enabled) ~= "boolean" then
+      return command_failure("enabled must be a boolean")
+    end
+    for _, surface in pairs(game.surfaces or {}) do
+      surface.daytime = enabled and 0 or 0.5
+      surface.freeze_daytime = true
+    end
+    return command_success(enabled)
+  end,
+
+  set_daytime = function(value)
+    value = tonumber(value)
+    if not value or value < 0 or value > 1 then
+      return command_failure("daytime must be between 0 and 1")
+    end
+    for _, surface in pairs(game.surfaces or {}) do
+      surface.daytime = value
+    end
+    return command_success(value)
+  end,
+
   save_game = function()
     local ok, error_message = pcall(function() game.auto_save() end)
     if not ok then return command_failure(tostring(error_message)) end
@@ -196,7 +348,12 @@ remote.add_interface("factorio_assistant", {
       local pollution = 0
       local pollution_ok, pollution_value = pcall(function() return surface.get_total_pollution() end)
       if pollution_ok and pollution_value then pollution = pollution_value end
-      table.insert(surfaces, {name = surface.name, index = surface.index, pollution = pollution})
+      table.insert(surfaces, {
+        name = surface.name,
+        index = surface.index,
+        pollution = pollution,
+        pinned_resources = pinned_resource_sites(surface),
+      })
     end
     local players = {}
     for _, player in pairs(game.connected_players or {}) do
@@ -225,6 +382,8 @@ remote.add_interface("factorio_assistant", {
       speed = game.speed or 0,
       tick_paused = game.tick_paused or false,
       daytime = game.surfaces.nauvis and game.surfaces.nauvis.daytime or 0,
+      day_night_cycle = game.surfaces.nauvis and not game.surfaces.nauvis.freeze_daytime or false,
+      daylight = game.surfaces.nauvis and (game.surfaces.nauvis.daytime <= 0.25 or game.surfaces.nauvis.daytime >= 0.75) or false,
       game_day = math.floor(game.tick / 25000),
       game_time = math.floor(game.tick / 60),
       research = research,
@@ -504,11 +663,15 @@ local function snapshot_player_data(player)
   local details = player_data(player)
   local player_deaths = storage.factorio_assistant_player_deaths or {}
   storage.factorio_assistant_player_deaths = player_deaths
-  details.connected = player.connected
+  local connected_ok, connected = pcall(function() return player.connected end)
+  details.connected = connected_ok and connected == true or false
   details.deaths = player_deaths[player.name] or 0
-  details.idle = (player.afk_time or 0) > 3600
-  details.position = position_data(player.position)
-  details.surface = player.surface and player.surface.name or "unknown"
+  local afk_ok, afk_time = pcall(function() return player.afk_time end)
+  details.idle = afk_ok and (afk_time or 0) > 3600 or false
+  local position_ok, position = pcall(function() return player.position end)
+  if position_ok and position then details.position = position_data(position) end
+  local surface_ok, surface = pcall(function() return player.surface end)
+  details.surface = surface_ok and surface and surface.name or "unknown"
   details.armor = {name = "none", equipment_count = 0}
   details.inventory = {used_slots = 0, total_slots = 0}
 
@@ -567,7 +730,10 @@ local function emit_state_snapshot()
     if pollution_ok and pollution_value ~= nil then
       pollution = pollution_value
     end
-    surfaces[surface.name] = {pollution = pollution}
+    surfaces[surface.name] = {
+      pollution = pollution,
+      pinned_resources = pinned_resource_sites(surface),
+    }
   end
 
   local research = ""
@@ -659,7 +825,7 @@ local function emit_configured_telemetry()
   end
 end
 
-script.on_nth_tick(telemetry_heartbeat_ticks, emit_configured_telemetry)
+factorio_assistant_emit_configured_telemetry = emit_configured_telemetry
 
 local function reader_from_event(event)
   local entity = event.entity or event.created_entity or event.destination
@@ -676,14 +842,13 @@ local function publish_reader_change(event, action)
   write_event(snapshot)
 end
 
-for _, event_name in pairs({
-  defines.events.on_built_entity,
-  defines.events.on_robot_built_entity,
-  defines.events.script_raised_built,
-  defines.events.script_raised_revive,
-}) do
-  script.on_event(event_name, function(event) publish_reader_change(event, "placed") end)
+factorio_assistant_handle_built = function(event)
+  publish_reader_change(event, "placed")
 end
+
+script.on_event(defines.events.script_raised_revive, function(event)
+  publish_reader_change(event, "placed")
+end)
 
 for _, event_name in pairs({
   defines.events.on_player_mined_entity,
@@ -750,6 +915,7 @@ script.on_event(defines.events.on_player_died, function(event)
 end)
 
 script.on_event(defines.events.on_player_joined_game, function(event)
+  dqol_on_player_joined_game(event)
   local player = game.get_player(event.player_index)
   if not player then
     return

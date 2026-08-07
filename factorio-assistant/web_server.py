@@ -12,7 +12,11 @@ import os
 import sys
 import time
 import shutil
+import signal
+import socket
+import threading
 import zipfile
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -41,6 +45,17 @@ HA_INTERNAL_NETWORK = ipaddress.ip_network(os.environ.get("HA_INTERNAL_NETWORK",
 API_TOKEN = os.environ.get("FACTORIO_API_TOKEN", "").strip()
 MOD_ENABLED = os.environ.get("ENABLE_TELEMETRY_MOD", "false").strip().lower() in {"true", "1", "yes", "on"}
 SERVER_SETTINGS_PATH = Path(os.environ.get("CONFIG_DIR") or "/config") / "server-settings.json"
+RUNTIME_DIR = Path(os.environ.get("FACTORIO_RUNTIME_DIR") or "/config/runtime")
+SAVE_BACKUP_SETTINGS_PATH = RUNTIME_DIR / "save-backup.json"
+RESTORE_REQUEST_PATH = RUNTIME_DIR / "restore-request.json"
+RESTORE_STATUS_PATH = RUNTIME_DIR / "restore-status.json"
+SAVE_BACKUP_PREFIX = "factorio-backup-"
+DEFAULT_BACKUP_MODE = "interval"
+DEFAULT_BACKUP_INTERVAL_HOURS = 12
+DEFAULT_BACKUP_DAILY_TIME = "00:00"
+DEFAULT_BACKUP_MAX_SAVES = 14
+DEFAULT_BACKUP_MAX_TOTAL_SIZE_MB = 0
+SAVE_LOCK = threading.Lock()
 logger = logging.getLogger("FactorioWeb")
 logger.setLevel(WEB_LOG_LEVELS.get(os.environ.get("LOG_LEVEL", "info").strip().lower(), logging.INFO))
 logger.propagate = False
@@ -61,7 +76,48 @@ def rcon_password() -> str:
     return os.environ.get("RCON_PASS", "").strip()
 
 
+def addon_options() -> dict[str, object]:
+    try:
+        options = json.loads(Path("/data/options.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return options if isinstance(options, dict) else {}
+
+
+def configured_port(name: str, default: int) -> int:
+    environment_name = {"server_port": "GAME_PORT", "rcon_port": "RCON_PORT", "rest_api_port": "REST_API_PORT"}.get(name, "")
+    value = addon_options().get(name, os.environ.get(environment_name, default))
+    try:
+        return max(1, min(65535, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def connection_summary(request_host: str = "") -> dict[str, object]:
+    host = request_host.split(",", 1)[0].strip()
+    if host:
+        try:
+            host = urlparse(f"//{host}").hostname or host
+        except ValueError:
+            host = host.split(":", 1)[0]
+    host = host or os.environ.get("FACTORIO_HOST", "") or socket.gethostname()
+    address = host
+    try:
+        address = socket.gethostbyname(host)
+    except (OSError, socket.gaierror):
+        if host in {"localhost", socket.gethostname()}:
+            address = "127.0.0.1"
+    return {
+        "hostname": host,
+        "ip": address,
+        "game_port": configured_port("server_port", 34197),
+        "rcon_port": configured_port("rcon_port", 27015),
+        "rest_api_port": configured_port("rest_api_port", 8100),
+    }
+
+
 _catalog_cache: tuple[int, dict[str, object]] | None = None
+_resource_name_cache: tuple[int, dict[str, str]] | None = None
 BUILTIN_MOD_NAMES = {"base", "core", "space-age", "quality", "elevated-rails"}
 ICON_FALLBACK = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#667f55"/><path d="M16 16h32v32H16z" fill="#dce8d2"/><path d="M22 22h20v20H22z" fill="#667f55"/></svg>'
 
@@ -116,6 +172,41 @@ def catalog_search(query: dict[str, list[str]]) -> dict[str, object]:
         "limit": limit,
         "results": matches[offset:offset + limit],
     }
+
+
+def localized_resource_name(name: object) -> str:
+    """Resolve a resource ID from the generated catalog for stale telemetry."""
+    global _resource_name_cache
+    resource_name = str(name or "").strip()
+    if not resource_name:
+        return "Resource"
+    known_names = {
+        "angels-ore1": "Saphirite",
+        "angels-ore2": "Jivolite",
+        "angels-ore3": "Stiratite",
+        "angels-ore4": "Crotinnium",
+        "angels-ore5": "Rubyte",
+        "angels-ore6": "Bobmonium",
+    }
+    if resource_name in known_names:
+        return known_names[resource_name]
+    try:
+        modified = CATALOG_PATH.stat().st_mtime_ns
+        if _resource_name_cache is None or _resource_name_cache[0] != modified:
+            with CATALOG_PATH.open("r", encoding="utf-8") as handle:
+                document = json.load(handle)
+            records = document.get("records", []) if isinstance(document, dict) else []
+            names = {
+                str(record.get("name")): str(record.get("localized_name"))
+                for record in records
+                if isinstance(record, dict)
+                and record.get("kind") == "resource"
+                and record.get("localized_name")
+            }
+            _resource_name_cache = (modified, names)
+        return _resource_name_cache[1].get(resource_name, resource_name)
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return resource_name
 
 
 def resolve_icon_path(raw_path: str) -> Path | None:
@@ -808,7 +899,7 @@ def known_player_summary() -> list[dict[str, object]]:
             "surface": str(details.get("surface", "unknown")),
             "x": float(details.get("x", 0) or 0),
             "y": float(details.get("y", 0) or 0),
-            "health": float(details.get("health", 0) or 0),
+            "health": float(details.get("health", details.get("current_health", 0)) or 0),
             "max_health": float(details.get("max_health", 0) or 0),
             "idle": bool(details.get("idle", False)),
             "motion": False,
@@ -842,7 +933,7 @@ def cached_player_summary() -> dict[str, dict[str, object]]:
             "surface": str(details.get("surface", position.get("surface", "unknown"))),
             "x": float(position.get("x", 0) or 0),
             "y": float(position.get("y", 0) or 0),
-            "health": float(details.get("health", 0) or 0),
+            "health": float(details.get("health", details.get("current_health", 0)) or 0),
             "max_health": float(details.get("max_health", 0) or 0),
             "idle": bool(details.get("idle", False)),
             "deaths": int(details.get("deaths", 0) or 0),
@@ -920,20 +1011,257 @@ def installed_mod_summary() -> list[dict[str, object]]:
 
 def save_summary() -> dict[str, object]:
     saves_dir = SHARE_DIR / "saves"
-    saves = []
+    saves = [
+        {
+            **file_info,
+            "autosave": str(file_info["name"]).casefold().startswith("autosave"),
+            "backup": str(file_info["name"]).startswith(SAVE_BACKUP_PREFIX),
+        }
+        for file_info in file_summary(saves_dir, ".zip")
+    ]
+    backup_settings = load_backup_settings()
+    return {
+        "directory": str(saves_dir),
+        "configured": configured_save_name(),
+        "files": saves,
+        "backup_enabled": backup_settings["enabled"],
+        "backup_mode": backup_settings["mode"],
+        "backup_interval_hours": backup_settings["interval_hours"],
+        "backup_daily_time": backup_settings["daily_time"],
+        "backup_max_saves": backup_settings["max_saves"],
+        "backup_max_total_size_mb": backup_settings["max_total_size_mb"],
+        "last_backup": backup_settings.get("last_backup"),
+    }
+
+
+def _as_bool(value: object, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().casefold() in {"1", "true", "yes", "on"} if value is not None else default
+
+
+def load_backup_settings() -> dict[str, object]:
+    settings: dict[str, object] = {
+        "enabled": True,
+        "mode": DEFAULT_BACKUP_MODE,
+        "interval_hours": DEFAULT_BACKUP_INTERVAL_HOURS,
+        "daily_time": DEFAULT_BACKUP_DAILY_TIME,
+        "max_saves": DEFAULT_BACKUP_MAX_SAVES,
+        "max_total_size_mb": DEFAULT_BACKUP_MAX_TOTAL_SIZE_MB,
+    }
+    data: object = {}
     try:
-        paths = sorted((path for path in saves_dir.iterdir() if path.is_file() and path.suffix.lower() == ".zip"), key=lambda path: path.name.casefold())
-    except OSError:
-        paths = []
-    for path in paths:
-        saves.append({**_file_info(path), "autosave": path.name.casefold().startswith("autosave")})
-    configured = "world.zip"
+        data = json.loads(SAVE_BACKUP_SETTINGS_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            settings.update(data)
+    except (OSError, json.JSONDecodeError):
+        pass
+    if isinstance(data, dict) and "times" in data and "mode" not in data:
+        settings["mode"] = "interval"
+        settings["interval_hours"] = 12
+    return normalize_backup_settings(settings)
+
+
+def normalize_backup_settings(settings: dict[str, object]) -> dict[str, object]:
+    settings = dict(settings)
+    settings["enabled"] = _as_bool(settings.get("enabled"), True)
+    mode = settings.get("mode")
+    settings["mode"] = mode if isinstance(mode, str) and mode in {"hourly", "daily", "interval"} else DEFAULT_BACKUP_MODE
+    try:
+        settings["interval_hours"] = max(1, min(168, int(settings.get("interval_hours", DEFAULT_BACKUP_INTERVAL_HOURS))))
+    except (TypeError, ValueError):
+        settings["interval_hours"] = DEFAULT_BACKUP_INTERVAL_HOURS
+    daily_time = str(settings.get("daily_time") or DEFAULT_BACKUP_DAILY_TIME)
+    settings["daily_time"] = daily_time if is_valid_time(daily_time) else DEFAULT_BACKUP_DAILY_TIME
+    try:
+        settings["max_saves"] = max(1, min(1000, int(settings.get("max_saves", DEFAULT_BACKUP_MAX_SAVES))))
+    except (TypeError, ValueError):
+        settings["max_saves"] = DEFAULT_BACKUP_MAX_SAVES
+    try:
+        settings["max_total_size_mb"] = max(0, min(102400, int(settings.get("max_total_size_mb", DEFAULT_BACKUP_MAX_TOTAL_SIZE_MB))))
+    except (TypeError, ValueError):
+        settings["max_total_size_mb"] = DEFAULT_BACKUP_MAX_TOTAL_SIZE_MB
+    return settings
+
+
+def is_valid_time(value: str) -> bool:
+    return len(value) == 5 and value[2] == ":" and value[:2].isdigit() and value[3:].isdigit() and 0 <= int(value[:2]) <= 23 and 0 <= int(value[3:]) <= 59
+
+
+def save_backup_settings(enabled: bool, schedule: dict[str, object] | None = None, last_backup: str | None = None, last_backup_at: float | None = None) -> dict[str, object]:
+    settings = load_backup_settings()
+    settings["enabled"] = enabled
+    if schedule is not None:
+        settings.update(schedule)
+        settings = normalize_backup_settings(settings)
+    if last_backup is not None:
+        settings["last_backup"] = last_backup
+    if last_backup_at is not None:
+        settings["last_backup_at"] = last_backup_at
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    temporary_path = SAVE_BACKUP_SETTINGS_PATH.with_suffix(".tmp")
+    temporary_path.write_text(json.dumps(settings, separators=(",", ":")), encoding="utf-8")
+    temporary_path.replace(SAVE_BACKUP_SETTINGS_PATH)
+    return settings
+
+
+def configured_save_name() -> str:
     try:
         options = json.loads(Path("/data/options.json").read_text(encoding="utf-8"))
-        configured = str(options.get("save_name") or configured)
+        return Path(str(options.get("save_name") or "world.zip")).name
     except (OSError, json.JSONDecodeError, AttributeError):
-        pass
-    return {"directory": str(saves_dir), "configured": configured, "files": saves}
+        return "world.zip"
+
+
+def wait_for_save_completion(source: Path, previous_mtime: int) -> bool:
+    deadline = time.monotonic() + 30
+    previous_signature: tuple[int, int] | None = None
+    stable_reads = 0
+    while time.monotonic() < deadline:
+        try:
+            stat = source.stat()
+        except OSError:
+            time.sleep(0.5)
+            continue
+        signature = (stat.st_mtime_ns, stat.st_size)
+        if stat.st_mtime_ns != previous_mtime:
+            if signature == previous_signature:
+                stable_reads += 1
+            else:
+                stable_reads = 0
+            if stable_reads >= 2:
+                return True
+        previous_signature = signature
+        time.sleep(0.5)
+    return False
+
+
+def restore_status() -> dict[str, object]:
+    try:
+        status = json.loads(RESTORE_STATUS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"state": "idle"}
+    if not isinstance(status, dict):
+        return {"state": "idle"}
+    if status.get("state") == "starting" and process_running("/opt/factorio/bin/x64/factorio"):
+        status = {**status, "state": "complete", "message": "Save restored and Factorio is running."}
+    return status
+
+
+def write_restore_status(state: str, message: str, source: str = "", target: str = "") -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    status = {"state": state, "message": message, "source": source, "target": target, "updated_at": time.time()}
+    temporary_path = RESTORE_STATUS_PATH.with_suffix(".tmp")
+    temporary_path.write_text(json.dumps(status, separators=(",", ":")), encoding="utf-8")
+    temporary_path.replace(RESTORE_STATUS_PATH)
+
+
+def write_restore_request(source: str, target: str) -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    request = {"source": source, "target": target, "requested_at": time.time()}
+    temporary_path = RESTORE_REQUEST_PATH.with_suffix(".tmp")
+    temporary_path.write_text(json.dumps(request, separators=(",", ":")), encoding="utf-8")
+    temporary_path.replace(RESTORE_REQUEST_PATH)
+
+
+def prune_save_backups(saves_dir: Path, settings: dict[str, object]) -> None:
+    backups = sorted(
+        (path for path in saves_dir.glob(f"{SAVE_BACKUP_PREFIX}*.zip") if path.is_file()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    max_saves = int(settings["max_saves"])
+    max_bytes = int(settings["max_total_size_mb"]) * 1024 * 1024
+    total_bytes = sum(path.stat().st_size for path in backups)
+    for old_backup in backups[1:]:
+        if len(backups) <= max_saves and (not max_bytes or total_bytes <= max_bytes):
+            break
+        try:
+            size = old_backup.stat().st_size
+            old_backup.unlink()
+            backups.remove(old_backup)
+            total_bytes -= size
+        except OSError as exc:
+            logger.warning("Could not rotate save backup %s: %s", old_backup.name, exc)
+
+
+def backup_is_due(settings: dict[str, object], now: datetime) -> bool:
+    last_backup_at = float(settings.get("last_backup_at", 0) or 0)
+    if settings["mode"] == "hourly":
+        return not last_backup_at or now.timestamp() - last_backup_at >= 3600
+    if settings["mode"] == "interval":
+        return not last_backup_at or now.timestamp() - last_backup_at >= int(settings["interval_hours"]) * 3600
+    hour, minute = (int(value) for value in str(settings["daily_time"]).split(":"))
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return now >= target and (not last_backup_at or last_backup_at < target.timestamp())
+
+
+def create_save_backup() -> str | None:
+    saves_dir = SHARE_DIR / "saves"
+    source = saves_dir / configured_save_name()
+    if not source.is_file():
+        logger.warning("Scheduled save backup skipped because %s is unavailable", source.name)
+        return None
+    with SAVE_LOCK:
+        if process_running("/opt/factorio/bin/x64/factorio"):
+            try:
+                previous_mtime = source.stat().st_mtime_ns
+            except OSError:
+                return None
+            response, _, error = execute_rcon("/save")
+            if response is None:
+                logger.warning("Scheduled save backup skipped because Factorio could not save: %s", error)
+                return None
+            if not wait_for_save_completion(source, previous_mtime):
+                logger.warning("Scheduled save backup skipped because Factorio did not finish saving")
+                return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M")
+        destination = saves_dir / f"{SAVE_BACKUP_PREFIX}{stamp}.zip"
+        temporary_path = destination.with_suffix(".tmp")
+        try:
+            shutil.copyfile(source, temporary_path)
+            temporary_path.replace(destination)
+        except OSError as exc:
+            temporary_path.unlink(missing_ok=True)
+            logger.warning("Scheduled save backup failed: %s", exc)
+            return None
+    settings = load_backup_settings()
+    prune_save_backups(saves_dir, settings)
+    save_backup_settings(True, last_backup=destination.name, last_backup_at=time.time())
+    logger.info("Created scheduled save backup %s", destination.name)
+    return destination.name
+
+
+def backup_scheduler() -> None:
+    while True:
+        now = datetime.now()
+        settings = load_backup_settings()
+        if settings["enabled"] and backup_is_due(settings, now):
+            create_save_backup()
+        time.sleep(30)
+
+
+def watchdog_summary() -> dict[str, object]:
+    path = Path(os.environ.get("FACTORIO_RUNTIME_DIR") or "/config/runtime") / "watchdog_snapshot.json"
+    try:
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"available": False, "healthy": False, "monitors": []}
+    if not isinstance(snapshot, dict):
+        return {"available": False, "healthy": False, "monitors": []}
+    monitors = []
+    processes = snapshot.get("processes", {})
+    if isinstance(processes, dict):
+        monitors.extend({"name": f"Process: {name}", "healthy": details.get("state") == "running"}
+                        for name, details in processes.items() if isinstance(details, dict))
+    ages = snapshot.get("heartbeat_age_seconds", {})
+    limits = snapshot.get("heartbeat_limits_seconds", {})
+    if isinstance(ages, dict) and isinstance(limits, dict):
+        monitors.extend({"name": f"Worker: {name}", "healthy": float(age) <= float(limits.get(name, 60))}
+                        for name, age in ages.items())
+    return {"available": True, "healthy": bool(snapshot.get("healthy")), "monitors": monitors, "checked_at": snapshot.get("checked_at", 0)}
+
+
 def telemetry_event_history(limit: int = 50) -> dict[str, object]:
     """Return a bounded, parsed tail of the current and previous event files."""
     bounded_limit = min(max(int(limit), 1), 200)
@@ -983,11 +1311,22 @@ def latest_world_snapshot() -> dict[str, object] | None:
                     continue
                 if tick < newest_tick:
                     continue
-                surfaces = [
-                    {"name": str(name), **details}
-                    for name, details in world.get("surfaces", {}).items()
-                    if isinstance(details, dict)
-                ]
+                surfaces = []
+                for name, details in world.get("surfaces", {}).items():
+                    if not isinstance(details, dict):
+                        continue
+                    surface = {"name": str(name), **details}
+                    pinned_resources = surface.get("pinned_resources", [])
+                    if isinstance(pinned_resources, list):
+                        surface["pinned_resources"] = [
+                            {
+                                **resource,
+                                "type_name": localized_resource_name(resource.get("type")) if resource.get("type") else resource.get("type_name", "Resource"),
+                            }
+                            for resource in pinned_resources
+                            if isinstance(resource, dict)
+                        ]
+                    surfaces.append(surface)
                 player_rows = []
                 for name, details in players.items():
                     if not isinstance(details, dict):
@@ -1045,7 +1384,7 @@ def world_summary() -> dict[str, object]:
     return result
 
 
-def dashboard_data() -> dict[str, object]:
+def dashboard_data(request_host: str = "") -> dict[str, object]:
     saves = file_summary(SHARE_DIR / "saves", ".zip")
     mods = installed_mod_summary()
     config_dir = Path(os.environ.get("CONFIG_DIR") or "/config")
@@ -1073,13 +1412,13 @@ def dashboard_data() -> dict[str, object]:
             "name": server_name,
             "running": process_running("/opt/factorio/bin/x64/factorio"),
             "version": "2.0.77",
-            "game_port": int(os.environ.get("GAME_PORT", "34197")),
-            "rcon_port": int(os.environ.get("RCON_PORT", "27015")),
+            "game_port": configured_port("server_port", 34197),
+            "rcon_port": configured_port("rcon_port", 27015),
         },
         "bridge": {
             "running": process_running("factorio-assistant-service.py"),
             "rcon_password_present": bool(rcon_password()),
-            "host": os.environ.get("FACTORIO_HOST", "127.0.0.1"),
+            "host": connection_summary(request_host)["ip"],
         },
         "storage": {
             "saves": saves,
@@ -1095,6 +1434,9 @@ def dashboard_data() -> dict[str, object]:
             "bridge": process_running("factorio-assistant-service.py"),
             "factorio": process_running("/opt/factorio/bin/x64/factorio"),
         },
+        "watchdog": watchdog_summary(),
+        "restore": restore_status(),
+        "connection": connection_summary(request_host),
         "generated_at": time.time(),
     }
 
@@ -1138,8 +1480,12 @@ class IngressHandler(BaseHTTPRequestHandler):
             self._send(b"Forbidden", "text/plain; charset=utf-8", 403)
             return
         if path == "/api/status":
-            payload = json.dumps(dashboard_data(), separators=(",", ":")).encode()
-            self._send(payload, "application/json; charset=utf-8")
+            try:
+                payload = json.dumps(dashboard_data(self.headers.get("Host", "")), separators=(",", ":")).encode()
+                self._send(payload, "application/json; charset=utf-8")
+            except Exception as exc:
+                logger.exception("Status payload generation failed")
+                self._send(json.dumps({"error": f"Status generation failed: {exc}"}).encode(), "application/json; charset=utf-8", 500)
             return
         if path == "/api/world":
             payload = json.dumps({**world_summary(), "storage": save_summary(), "mods": installed_mod_summary()}, separators=(",", ":")).encode()
@@ -1195,14 +1541,13 @@ class IngressHandler(BaseHTTPRequestHandler):
         self._send(b"Not found", "text/plain; charset=utf-8", 404)
 
     def do_POST(self) -> None:  # noqa: N802
-        if WEB_ROLE == "ui":
-            self._send(b"Not found", "text/plain; charset=utf-8", 404)
-            return
-        if not self._rest_allowed():
+        path = urlparse(self.path).path
+        save_paths = {"/api/saves/restore", "/api/saves/delete", "/api/saves/backup-settings"}
+        allowed = self._allowed() if WEB_ROLE == "ui" and path in save_paths else self._rest_allowed()
+        if not allowed:
             self._send(b"Forbidden", "text/plain; charset=utf-8", 403)
             return
-        path = urlparse(self.path).path
-        if path not in {"/api/rcon", "/api/factory/inspect", "/api/factory/map", "/api/factory/production", "/api/factory/plan", "/api/factory/build", "/api/factory/demolish", "/api/factory/helper", "/api/saves/restore"}:
+        if path not in {"/api/rcon", "/api/factory/inspect", "/api/factory/map", "/api/factory/production", "/api/factory/plan", "/api/factory/build", "/api/factory/demolish", "/api/factory/helper", *save_paths}:
             self._send(b"Not found", "text/plain; charset=utf-8", 404)
             return
         try:
@@ -1222,27 +1567,83 @@ class IngressHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._send(b'{"error":"Request body must be valid JSON."}', "application/json; charset=utf-8", 400)
             return
+        if path == "/api/saves/backup-settings":
+            enabled = payload.get("enabled") if isinstance(payload, dict) else None
+            schedule = {key: payload.get(key) for key in ("mode", "interval_hours", "daily_time", "max_saves", "max_total_size_mb")} if isinstance(payload, dict) else {}
+            try:
+                valid_schedule = (
+                    schedule["mode"] in {"hourly", "daily", "interval"}
+                    and isinstance(schedule["daily_time"], str) and is_valid_time(schedule["daily_time"])
+                    and 1 <= int(schedule["interval_hours"]) <= 168
+                    and 1 <= int(schedule["max_saves"]) <= 1000
+                    and 0 <= int(schedule["max_total_size_mb"]) <= 102400
+                )
+            except (KeyError, TypeError, ValueError):
+                valid_schedule = False
+            if not isinstance(enabled, bool) or not valid_schedule:
+                self._send(b'{"error":"Invalid backup schedule or retention settings."}', "application/json; charset=utf-8", 400)
+                return
+            schedule["interval_hours"] = int(schedule["interval_hours"])
+            schedule["max_saves"] = int(schedule["max_saves"])
+            schedule["max_total_size_mb"] = int(schedule["max_total_size_mb"])
+            self._send(json.dumps(save_backup_settings(enabled, schedule), separators=(",", ":")).encode(), "application/json; charset=utf-8")
+            return
+        if path == "/api/saves/delete":
+            name = payload.get("name") if isinstance(payload, dict) else None
+            configured = configured_save_name()
+            target = SHARE_DIR / "saves" / name if isinstance(name, str) else None
+            if not target or target.name != name or target.suffix.casefold() != ".zip" or name == configured:
+                self._send(b'{"error":"Only a non-configured save .zip file can be deleted."}', "application/json; charset=utf-8", 400)
+                return
+            try:
+                if target.resolve().parent != (SHARE_DIR / "saves").resolve() or not target.is_file():
+                    raise OSError("save file is unavailable")
+                target.unlink()
+            except OSError as exc:
+                self._send(json.dumps({"error": f"Delete failed: {exc}"}).encode(), "application/json; charset=utf-8", 409)
+                return
+            self._send(json.dumps({"deleted": name}, separators=(",", ":")).encode(), "application/json; charset=utf-8")
+            return
         if path == "/api/saves/restore":
             source = payload.get("source") if isinstance(payload, dict) else None
             storage = save_summary()
             target = str(storage["configured"])
-            if process_running("/opt/factorio/bin/x64/factorio"):
-                self._send(b'{"error":"Stop Factorio before restoring a save."}', "application/json; charset=utf-8", 409)
-                return
-            if not isinstance(source, str) or not source.casefold().startswith("autosave") or Path(source).name != source or Path(source).suffix.casefold() != ".zip":
-                self._send(b'{"error":"Only an autosave .zip file can be restored."}', "application/json; charset=utf-8", 400)
+            if not isinstance(source, str) or Path(source).name != source or Path(source).suffix.casefold() != ".zip" or source == target:
+                self._send(b'{"error":"Select a different save .zip file to restore."}', "application/json; charset=utf-8", 400)
                 return
             source_path = SHARE_DIR / "saves" / source
             target_path = SHARE_DIR / "saves" / Path(target).name
+            current_restore = restore_status()
+            if current_restore.get("state") in {"stopping", "restoring", "starting"}:
+                self._send(b'{"error":"A save restore is already in progress."}', "application/json; charset=utf-8", 409)
+                return
+            if process_running("/opt/factorio/bin/x64/factorio"):
+                try:
+                    if source_path.resolve().parent != target_path.resolve().parent or not source_path.is_file():
+                        raise OSError("save file is unavailable")
+                    write_restore_request(source, target_path.name)
+                    write_restore_status("stopping", "Stopping Factorio before restoring the save.", source, target_path.name)
+                    pid = int((RUNTIME_DIR / "factorio.pid").read_text(encoding="utf-8").strip())
+                    os.kill(pid, signal.SIGTERM)
+                except (OSError, ValueError) as exc:
+                    write_restore_status("error", f"Could not stop Factorio: {exc}", source, target_path.name)
+                    RESTORE_REQUEST_PATH.unlink(missing_ok=True)
+                    self._send(json.dumps({"error": str(exc)}).encode(), "application/json; charset=utf-8", 409)
+                    return
+                self._send(json.dumps({"state": "stopping", "source": source, "target": target_path.name}, separators=(",", ":")).encode(), "application/json; charset=utf-8", 202)
+                return
             try:
                 if source_path.resolve().parent != target_path.resolve().parent or not source_path.is_file():
                     raise OSError("save file is unavailable")
                 temporary_path = target_path.with_suffix(target_path.suffix + ".restore.tmp")
+                write_restore_status("restoring", "Restoring the selected save.", source, target_path.name)
                 shutil.copyfile(source_path, temporary_path)
                 temporary_path.replace(target_path)
             except OSError as exc:
+                write_restore_status("error", f"Restore failed: {exc}", source, target_path.name)
                 self._send(json.dumps({"error": f"Restore failed: {exc}"}).encode(), "application/json; charset=utf-8", 409)
                 return
+            write_restore_status("complete", "Save restored. Factorio remains stopped.", source, target_path.name)
             self._send(json.dumps({"restored": source, "target": target_path.name}, separators=(",", ":")).encode(), "application/json; charset=utf-8")
             return
         if path != "/api/rcon":
@@ -1293,6 +1694,8 @@ class ThreadingIngressServer(ThreadingHTTPServer):
 
 
 def main() -> None:
+    if WEB_ROLE == "ui":
+        threading.Thread(target=backup_scheduler, name="save-backup", daemon=True).start()
     with ThreadingIngressServer((HOST, PORT), IngressHandler) as server:
         logger.info("Ingress %s server listening on %s:%s", WEB_ROLE, HOST, PORT)
         server.serve_forever()

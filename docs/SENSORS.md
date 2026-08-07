@@ -13,7 +13,41 @@ Replace `<mqtt_prefix>` below with the configured `mqtt_prefix` value. The defau
 | Fixed world sensors | 16 |
 | Surface entities | 1 pollution sensor per Factorio surface; plus 1 attack binary sensor when the telemetry mod is enabled |
 | Player entities | 10 per discovered player |
-| Server controls | 7 |
+| Server controls | 9 |
+
+## Sender Combinators
+
+Each Factorio Assistant Sender imports signals from both its red and green
+input networks by default. Red and green signals are always separate entities,
+even when the same signal is present on both networks. Each signal name uses
+the configured Factorio locale followed by its network, for example
+`Iron Plate (Red)` and `Iron Plate (Green)`.
+
+Each discovered Sender device also provides eight writable Home Assistant
+number entities: `Red Signal A` through `Red Signal D` and `Green Signal A`
+through `Green Signal D`. Their values are retained by the Factorio Assistant
+mod and kept separate by wire network.
+
+The same device also reports eight read-only input sensors named `Red Signal A
+Input` through `Red Signal D Input` and `Green Signal A Input` through `Green
+Signal D Input`. These contain the live Factorio virtual signals `signal-A`
+through `signal-D` received on each network.
+
+When DQOL Resource Monitor is installed, each surface with pinned active sites
+gets a device named `Factorio Resource Monitor: <Surface Name>`. Each pinned
+site gets six sensors: unitless Amount, localized Ore Type, % Remaining, Location,
+Estimated Depletion, and Rate (`/s`). Estimated Depletion is a Home Assistant
+duration sensor in seconds; the underlying DQOL value is measured in Factorio
+ticks. Unpinned and archived sites are not imported.
+
+Circuit signal values and categorical Factorio entity states do not declare a
+unit of measurement. Player inventory state uses `%` for used slots; the item
+breakdown is published as JSON attributes rather than a unit-bearing sensor
+value.
+
+Resource Monitor is included in the Factorio Assistant mod. Every multiplayer
+client must install the same Factorio Assistant archive as the server before
+joining.
 
 All discovered entities use the Factorio server or Factorio game device as appropriate. State and attribute topics are rewritten to the entity-scoped form described in [MQTT topics](#mqtt-topics).
 
@@ -132,10 +166,10 @@ Current event names are:
 - `rocket_launched`: silo details, optional launching player, and tick.
 - `entity_died`: throttled player-force or enemy unit/spawner death with entity and cause details.
 
-The internal `state_snapshot` event is consumed by the bridge and is not
-published on the generic event topic. It refreshes every 1,200 game ticks
-(approximately 20 seconds at 60 UPS) and carries the current player, research,
-surface, pollution, and world-count state.
+The `state_snapshot` event is consumed by the bridge to refresh live state and
+is also published on the generic event topic. It refreshes every 1,200 game
+ticks (approximately 20 seconds at 60 UPS) and carries the current player,
+research, surface, pollution, and world-count state.
 
 Events are intentionally structured and throttled rather than exposed as one MQTT entity per game action. The bridge keeps the existing attack binary sensor in addition to the generic event stream.
 
@@ -167,8 +201,11 @@ The bridge also creates these non-sensor entities:
 | `switch.factorio_server_enemy_evolution` | Switch | Enable or disable enemy evolution |
 | `switch.factorio_server_pollution` | Switch | Enable or disable pollution |
 | `switch.factorio_server_pause` | Switch | Pause or resume the game |
+| `switch.factorio_server_daylight` | Switch | Freeze all surfaces at midday or night |
 | `button.factorio_server_save` | Button | Save the game |
+| `button.factorio_server_day_night_cycle_resume` | Button | Resume the cycle when it is stopped |
 | `number.factorio_server_game_speed` | Number | Set game speed from `0.1` to `10.0` |
+| `number.factorio_server_time_of_day` | Number | Set synchronized daytime from `0.0` to `1.0` |
 | `text.factorio_server_broadcast_chat` | Text | Broadcast a message to players |
 
 ## MQTT Topics

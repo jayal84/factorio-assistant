@@ -219,15 +219,26 @@ script:
 
 For speed and broadcast commands, validate and constrain user input in the script or automation. The built-in MQTT number and text entities already apply the add-on's normal validation for those controls.
 
-## Autosave Restore
+## Save Management
 
-The browser provides autosave restore through `POST /api/saves/restore`. It is intentionally not included as an unrestricted Home Assistant REST command: the endpoint copies an autosave over the configured save and refuses to run while Factorio is active.
+Scheduled backup settings are managed only from the Save files ingress page. They are not configured in `config.yaml` and are not exposed as REST commands. The page allows these values to be changed without rebuilding or restarting the add-on:
+
+- backup enabled or disabled
+- hourly, daily-at-time, or every-X-hours scheduling
+- maximum number of backup archives
+- optional maximum combined backup size in MB
+
+The defaults are enabled, every 12 hours, 14 archives, and no combined-size limit. A total-size value of `0` means unlimited. The page also identifies backup archives in the save list and provides deletion for non-configured saves.
+
+## Save Restore
+
+The browser provides save restore through `POST /api/saves/restore`. The restore request is asynchronous when Factorio is running: the assistant asks the supervisor to stop Factorio, copies the selected save over the configured save atomically, and the supervisor starts Factorio again. The ingress page displays the current restore state. The endpoint is intentionally not included as an unrestricted Home Assistant REST command.
 
 Use the web UI after stopping Factorio, or call the endpoint only from a tightly controlled administrative workflow:
 
 ```yaml
 rest_command:
-  factorio_restore_autosave:
+  factorio_restore_save:
     url: "http://local-factorio-assistant:8100/api/saves/restore"
     method: POST
     content_type: application/json
@@ -236,7 +247,7 @@ rest_command:
       {"source":"{{ source }}"}
 ```
 
-The source must be an autosave `.zip` basename. Confirm the selected save before calling this command and restart Factorio after a successful restore.
+The source must be a save `.zip` basename and must not be the configured save itself. Confirm the selected save before calling this command; API callers should monitor the ingress status page for completion. A successful HTTP response only confirms that the restore request was accepted when Factorio was still running; it does not mean the replacement has completed.
 
 ## External Script Examples
 
