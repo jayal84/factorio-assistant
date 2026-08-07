@@ -1,0 +1,35 @@
+# Local development
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+
+# Local workspace and maintainer files
+DEVNOTES.md
+factorio_server.code-workspace
+reference/
+
+# Home Assistant and Factorio runtime state
+player_profiles.json
+/share/
+config/
+runtime/
+logs/
+saves/
+mods/
+script-output/
+*.log
+*.tmp
+
+# Generated catalogs and local credentials
+data/catalog.json
+factorio-current-version.txt
+rcon_pass.txt
+options.json
+
+# Generated mod packages
+factorio_assistant_*.zip
