@@ -2,6 +2,36 @@
 
 All notable changes to **Factorio Assistant** will be documented here.
 
+## 0.3.0 - 2026-08-15
+
+- Expose dedicated Home Assistant services for AAI vehicle follow, drive, and mining actions.
+- Add logistics and vehicle UI updates in the ingress app, including the AAI fleet summary, AAI vehicle controls, LTN controls, and tracked resource depletion display.
+- Add and expose LTN support with summary and control services for clearing connections, fuel exclusions, temp stops, delivery reassignment, and train snapshots.
+- Export tracked Resource Monitor sites through a separate, infrequent `resource_monitor_snapshot` stream for UI use.
+- Surface estimated depletion for tracked resource sites in the ingress resources view and related snapshots.
+- Cache the generated prototype catalog and rebuild it only when the active mod set changes.
+- Remove the redundant generic AAI dispatch surface in favor of the explicit vehicle action services.
+- Update the runtime save-path compatibility to mirror the default Factorio save locations under `/share/factorio/saves`.
+
+## 0.2.5 - 2026-08-08
+
+- Added native Home Assistant event-bus delivery for structured Factorio telemetry.
+- Added the latest chat event entity and generic event bus compatibility alias.
+- Fixed the latest chat event entity so new console chat records are emitted as Home Assistant events and the latest known chat is restored on setup.
+- Fully migrated MQTT discovery and runtime publishing to the native Home Assistant integration (2026-08-09). The add-on no longer publishes MQTT discovery or runtime topics and `paho-mqtt` was removed from the add-on dependencies. Use the native Home Assistant integration and REST API for telemetry, controls, and events.
+- Added a prioritized push endpoint for low-latency events: the integration registers `POST /api/factorio_assistant/push` which accepts JSON event payloads authenticated by the integration's API token. The add-on can be configured to POST `console_chat` (and other priority events) to this endpoint using the `ha_push_url` and `ha_push_token` add-on options for fast delivery to Home Assistant's event bus.
+
+## 0.2.4 - 2026-08-08
+
+- Separated the required Factorio Assistant mod into its independently published package.
+- Updated the add-on to require the separately installed and enabled mod.
+
+## 0.2.3 - 2026-08-07
+
+- Added player armor details to structured Factorio telemetry.
+- Added English item and entity translations for Angel's ores, including Bobmonium (`angels-ore6`).
+- Updated the bundled companion mod and add-on release metadata to `0.2.3-alpha`.
+
 ## 0.2.2 - 2026-08-07 - Bug fixes from 0.2.1
 
 - Fixed runtime translation retries so modded resource names resolve for players.

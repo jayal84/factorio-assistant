@@ -154,9 +154,9 @@ to 50 item grants with a combined maximum of 50,000 items. Builder and Helper
 are state-changing operations and should remain behind deliberate scripts or
 automations.
 
-When `enable_telemetry_mod` is enabled, the Helper endpoint sends its validated
-item grants through the Factorio Assistant `give_items` interface. If the mod
-is disabled or unavailable, it uses the existing bounded RCON implementation.
+The Helper endpoint sends its validated item grants through the Factorio
+Assistant `give_items` interface and returns an unavailable error if the mod
+cannot be reached.
 
 ## Controls
 

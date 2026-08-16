@@ -1,0 +1,667 @@
+﻿search_catalog:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    query:
+      required: true
+      selector:
+        text:
+    search_type:
+      default: all
+      selector:
+        select:
+          options:
+            - all
+            - item
+            - entity
+            - recipe
+            - technology
+    limit:
+      default: 25
+      selector:
+        number:
+          min: 1
+          max: 50
+          mode: box
+    offset:
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10000
+          mode: box
+
+get_catalog_entry:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    name:
+      required: true
+      selector:
+        text:
+    kind:
+      default: ""
+      selector:
+        text:
+    detail:
+      default: full
+      selector:
+        select:
+          options:
+            - full
+            - compact
+
+get_catalog_production:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    items:
+      required: true
+      example: "[{\"name\":\"iron-plate\",\"rate\":60}]"
+      selector:
+        text:
+          multiline: true
+    known_recipes:
+      default: "[]"
+      selector:
+        text:
+          multiline: true
+
+list_mods:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+
+get_status:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+
+get_world:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+
+get_research:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+
+get_events:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    limit:
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 200
+          mode: box
+    event:
+      default: ""
+      selector:
+        text:
+
+get_player_data:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    player:
+      default: ""
+      selector:
+        text:
+
+get_resource_monitor_list:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    surface:
+      default: ""
+      selector:
+        text:
+
+get_aai_vehicle_summary:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+
+get_ltn_summary:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+
+inspect_area:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    surface:
+      default: nauvis
+      selector:
+        text:
+    center_x:
+      default: 0
+      selector:
+        number:
+          mode: box
+    center_y:
+      default: 0
+      selector:
+        number:
+          mode: box
+    area_size:
+      default: 64
+      selector:
+        number:
+          min: 1
+          max: 256
+          mode: box
+    limit:
+      default: 500
+      selector:
+        number:
+          min: 1
+          max: 5000
+          mode: box
+
+inspect_map:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    surface:
+      default: nauvis
+      selector:
+        text:
+    center_x:
+      default: 0
+      selector:
+        number:
+          mode: box
+    center_y:
+      default: 0
+      selector:
+        number:
+          mode: box
+    area_size:
+      default: 64
+      selector:
+        number:
+          min: 1
+          max: 256
+          mode: box
+    limit:
+      default: 500
+      selector:
+        number:
+          min: 1
+          max: 5000
+          mode: box
+    include_entities:
+      default: true
+      selector:
+        boolean:
+    include_resources:
+      default: true
+      selector:
+        boolean:
+    include_tiles:
+      default: false
+      selector:
+        boolean:
+
+get_production:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    surface:
+      default: nauvis
+      selector:
+        text:
+    items:
+      required: true
+      example: "[\"iron-plate\", \"copper-plate\"]"
+      selector:
+        text:
+          multiline: true
+
+plan_factory:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    surface:
+      default: nauvis
+      selector:
+        text:
+    center_x:
+      default: 0
+      selector:
+        number:
+          mode: box
+    center_y:
+      default: 0
+      selector:
+        number:
+          mode: box
+    area_size:
+      default: 64
+      selector:
+        number:
+          min: 1
+          max: 256
+          mode: box
+    goal:
+      required: true
+      selector:
+        text:
+    items:
+      example: "[\"electronic-circuit\"]"
+      selector:
+        text:
+          multiline: true
+
+build_factory:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    surface:
+      default: nauvis
+      selector:
+        text:
+    entities:
+      required: true
+      example: "[{\"name\":\"assembling-machine-2\",\"position\":{\"x\":0,\"y\":0}}]"
+      selector:
+        text:
+          multiline: true
+    real:
+      default: false
+      selector:
+        boolean:
+    dry_run:
+      default: false
+      selector:
+        boolean:
+
+give_items:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    player:
+      required: true
+      selector:
+        text:
+    items:
+      required: true
+      example: "[{\"name\":\"iron-plate\",\"count\":100}]"
+      selector:
+        text:
+          multiline: true
+
+follow_aai_vehicle:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    player:
+      required: true
+      selector:
+        text:
+    unit_kind:
+      default: any
+      selector:
+        select:
+          options:
+            - any
+            - miner
+            - hauler
+            - warden
+            - chaingunner
+            - flame_tank
+            - flame_tumbler
+            - ironclad
+            - laser_tank
+    surface:
+      default: ""
+      selector:
+        text:
+
+drive_aai_vehicle:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    unit_kind:
+      default: any
+      selector:
+        select:
+          options:
+            - any
+            - miner
+            - hauler
+            - warden
+            - chaingunner
+            - flame_tank
+            - flame_tumbler
+            - ironclad
+            - laser_tank
+    surface:
+      default: ""
+      selector:
+        text:
+    center_x:
+      default: 0
+      selector:
+        number:
+          mode: box
+    center_y:
+      default: 0
+      selector:
+        number:
+          mode: box
+
+mine_aai_vehicle:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    unit_kind:
+      default: miner
+      selector:
+        select:
+          options:
+            - any
+            - miner
+            - hauler
+            - warden
+            - chaingunner
+            - flame_tank
+            - flame_tumbler
+            - ironclad
+            - laser_tank
+    surface:
+      default: ""
+      selector:
+        text:
+    center_x:
+      default: 0
+      selector:
+        number:
+          mode: box
+    center_y:
+      default: 0
+      selector:
+        number:
+          mode: box
+    area_size:
+      default: 32
+      selector:
+        number:
+          min: 1
+          max: 256
+          mode: box
+
+dispatch_ltn_command:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    action:
+      required: true
+      selector:
+        select:
+          options:
+            - clear_all_surface_connections
+            - exclude_from_fuel_schedule
+            - get_or_create_next_temp_stop
+            - get_next_logistic_stop
+            - reassign_delivery
+    name:
+      default: ""
+      selector:
+        text:
+    train_id:
+      default: 0
+      selector:
+        number:
+          mode: box
+    old_train_id:
+      default: 0
+      selector:
+        number:
+          mode: box
+    new_train_id:
+      default: 0
+      selector:
+        number:
+          mode: box
+    schedule_index:
+      default: 0
+      selector:
+        number:
+          mode: box
+
+demolish_area:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    surface:
+      default: nauvis
+      selector:
+        text:
+    center_x:
+      default: 0
+      selector:
+        number:
+          mode: box
+    center_y:
+      default: 0
+      selector:
+        number:
+          mode: box
+    area_size:
+      default: 64
+      selector:
+        number:
+          min: 1
+          max: 256
+          mode: box
+    limit:
+      default: 500
+      selector:
+        number:
+          min: 1
+          max: 5000
+          mode: box
+    names:
+      example: "[\"transport-belt\", \"small-electric-pole\"]"
+      selector:
+        text:
+          multiline: true
+    include_resources:
+      default: false
+      selector:
+        boolean:
+    real:
+      default: false
+      selector:
+        boolean:
+
+set_pause:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    paused:
+      required: true
+      selector:
+        boolean:
+
+set_daylight:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    enabled:
+      required: true
+      selector:
+        boolean:
+
+set_daytime:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    value:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.001
+          mode: slider
+
+set_game_speed:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    speed:
+      required: true
+      selector:
+        number:
+          min: 0.1
+          max: 10
+          step: 0.1
+          mode: slider
+
+set_map_setting:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    setting:
+      required: true
+      selector:
+        select:
+          options:
+            - enemy_evolution
+            - pollution
+    enabled:
+      required: true
+      selector:
+        boolean:
+
+set_day_night_cycle:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    enabled:
+      required: true
+      selector:
+        boolean:
+
+save_game:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+
+send_chat:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant
+    message:
+      required: true
+      selector:
+        text:
+
+clear_revealed_enemies:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: factorio_assistant

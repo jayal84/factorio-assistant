@@ -11,7 +11,7 @@ Replace `<mqtt_prefix>` below with the configured `mqtt_prefix` value. The defau
 | Fixed server sensors | 11 |
 | Fixed server binary sensors | 2 |
 | Fixed world sensors | 16 |
-| Surface entities | 1 pollution sensor per Factorio surface; plus 1 attack binary sensor when the telemetry mod is enabled |
+| Surface entities | 1 pollution sensor per Factorio surface; plus 1 attack binary sensor from the required telemetry mod |
 | Player entities | 10 per discovered player |
 | Server controls | 9 |
 
@@ -115,7 +115,7 @@ For every Factorio surface reported by RCON, the bridge creates one entity:
 - State topic: `<mqtt_prefix>/sensor/factorio_world/factorio_surface_<safe_surface>_pollution/state`
 - Unit: `pollution`; numeric measurement
 
-When `enable_telemetry_mod` is enabled, it also creates:
+The required telemetry mod also creates:
 
 - Entity: `binary_sensor.factorio_surface_<safe_surface>_under_attack`
 - Name: `<Surface Name>: Under Attack`
@@ -147,7 +147,7 @@ Player telemetry requires bridge, RCON, and player availability. The connected e
 
 Motion is derived from successive position polls, so a movement shorter than the polling interval can be missed. The attack entity requires the bundled event mod and does not exist when that option is disabled.
 
-The bridge also does not currently parse Factorio log files into an event entity. Persistent logs remain available under `/share/factorio/logs` for diagnostics; they are not an MQTT telemetry source.
+The native Home Assistant integration exposes the latest `console_chat` record as a Factorio event entity. It fires a generic Home Assistant bus event named `factorio_assistant_event` for each newly observed telemetry record. The original event name is available as `event_type`, with the original event fields included directly in the event data. Chat also fires the compatibility event `factorio_assistant_chat`. The first poll seeds the cursor and does not replay old messages. Persistent Factorio logs remain available under `/share/factorio/logs` for diagnostics; they are not an MQTT telemetry source.
 
 The optional Factorio Assistant mod archive is available at `/share/factorio/factorio_assistant_<version>.zip` for players who need to install the same mod in a local client. The version comes from the mod's `info.json`; the server copy is installed under `/share/factorio/mods` when the option is enabled.
 
@@ -180,7 +180,7 @@ rollover archive. Home Assistant can call the equivalent
 `rest_command.factorio_telemetry_events` command when an automation needs a
 recent event snapshot.
 
-When the optional telemetry mod is enabled, its periodic state snapshot is the primary source for current player, research, surface, pollution, and world-count telemetry. The bridge uses the existing RCON stats command only when the MOD snapshot is missing or older than 45 seconds. RCON remains the fallback for current snapshots and is still used for on-demand commands such as research detail, factory inspection, and controls. The mod should focus on event timing and causality, where polling can miss short-lived activity.
+The required telemetry mod is the source for current player, research, surface, pollution, and world-count telemetry. The bridge no longer polls equivalent state through generated RCON scripts. RCON remains the transport for validated mod commands and lightweight readiness or diagnostic checks.
 
 ## Availability
 

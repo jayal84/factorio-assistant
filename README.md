@@ -2,19 +2,23 @@
 
 ![Factorio 2.0.77](https://img.shields.io/badge/Factorio-2.0.77-blue.svg)
 ![Requires Linux amd64 Architecture](https://img.shields.io/badge/Linux%20amd64-required-orange.svg)
-![Requires Mosquitto MQTT Broker](https://img.shields.io/badge/MQTT%20broker-required-orange.svg)
+
 
 Factorio Assistant runs a headless Factorio 2.0.77 Space Age server as a Home Assistant add-on and connects it to your smart home.
 
+Migration note: MQTT discovery and bridge publishing has been fully migrated to the native Home Assistant integration as of 2026-08-09. The add-on no longer publishes MQTT discovery or runtime topics; use the `integration/custom_components/factorio_assistant` integration and the add-on REST API for telemetry, controls, and events.
+
+Fast event delivery: the integration exposes a push endpoint at `/api/factorio_assistant/push` which the add-on can POST priority events to. Configure the add-on options `ha_push_url` (default: `http://supervisor/core/api/factorio_assistant/push`) and `ha_push_token` (the integration's `api_token`) to enable fast, authenticated delivery of `console_chat` and other prioritized events into Home Assistant's event bus.
+
 ## What It Offers
 
-- MQTT Discovery for server, world, player, factory, and health sensors
-- MQTT controls for saving, pausing, changing game speed, toggling settings, and broadcasting chat
+- Native Home Assistant integration for server, world, player, factory, and health sensors
+- Native HA services and events for saving, pausing, changing game speed, toggling settings, and broadcasting chat
 - An authenticated ingress dashboard for server status, players, world data, factory searches, and controls
 - RCON and authenticated REST APIs for automation and advanced integrations
 - Player, research, pollution, evolution, production, rocket, and surface telemetry
-- An optional companion mod for structured events, richer snapshots, circuit-network reading, and validated commands
-- RCON polling fallback when the telemetry mod is disabled, unavailable, or stale
+- A required, separately published companion mod for structured events, richer snapshots, circuit-network reading, and validated commands
+- Mod-backed telemetry with RCON retained for transport, readiness, and administration
 - Watchdog health reporting, persistent logs, save management, and optional Mod Portal updates
 
 The add-on stores saves, mods, logs, and generated telemetry under `/share/factorio`. It creates a new save from the configured map settings when the selected save does not yet exist.
@@ -28,7 +32,7 @@ Planned features also include adding external Factorio tools to the add-on, such
 ## Requirements
 
 - Home Assistant OS, Supervised, or Container on Linux amd64
-- A Mosquitto MQTT broker available to Home Assistant
+- A Home Assistant instance for the native integration
 - Network access for the Factorio game, RCON, ingress, and REST API ports
 
 ## Install

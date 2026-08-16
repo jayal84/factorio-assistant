@@ -25,6 +25,7 @@ Back up the `saves` directory and keep sufficient free space for save files, mod
 Factorio writes rotating autosaves according to the values in `/config/server-settings.json`.
 
 The add-on uses blocking saves (`non_blocking_saving: false`) for reliable writes on the Home Assistant container filesystem. With the default settings, Factorio writes `autosave1.zip` through `autosave8.zip` in `/share/factorio/saves` while the server is running.
+For compatibility with Factorio's default search paths, the startup script also mirrors `/opt/factorio/saves` and `/factorio/saves` to `/share/factorio/saves`.
 
 The Save files ingress page controls the assistant's additional scheduled backups. Backup settings are kept in runtime storage and are deliberately not add-on options in `config.yaml`.
 
@@ -42,7 +43,7 @@ The page lists normal saves, Factorio autosaves, and assistant backup archives. 
 
 Factorio Assistant reports Factorio and bridge status, save and mod archive counts, and recent logs through the Home Assistant ingress panel. The separate REST API also exposes the cached prototype catalog for authenticated Home Assistant requests.
 
-The prototype catalog is generated from Factorio's `--dump-data` output after mod synchronization. The cache is stored ephemerally at `/tmp/factorio-assistant/catalog.json`. It retains the full prototype objects, adds localized names and static recipe reverse indexes, and includes Factorio's generated `mod-settings-dump.json` as searchable `setting` records. A separate `--dump-prototype-locale` export is generated at startup so translated names and descriptions are resolved for the ingress catalog.
+The prototype catalog is generated from Factorio's `--dump-data` output after mod synchronization and is cached at `/config/runtime/catalog/catalog.sqlite`. Startup reuses that cache when the enabled mod set and mod archives match the stored fingerprint, so the expensive dump only runs after mod changes. The catalog retains the full prototype objects, adds localized names and static recipe reverse indexes, and includes Factorio's generated `mod-settings-dump.json` as searchable `setting` records. A separate `--dump-prototype-locale` export is generated only when the cache needs to be rebuilt so translated names and descriptions stay in sync with the active mods.
 
 The catalog contains definition data only. Current production rates, inventories, power, pollution, researched state, and other factory telemetry come from the separate RCON bridge.
 
@@ -115,7 +116,7 @@ appear as callable tools rather than static entities.
 
 ### Factorio chat assistant
 
-When `enable_telemetry_mod` is enabled, player console chat is published as a
+The required telemetry mod publishes player console chat as a
 non-retained JSON MQTT event on:
 
 ```text
@@ -130,11 +131,7 @@ conversation agent, and print the response back into Factorio:
 The mod also exposes the stable `factorio_assistant` command interface. The
 bridge uses it for validated chat, game-speed, pause, map-setting, and save
 commands, plus structured world, research, factory, and item-helper requests
-when the mod toggle is enabled. RCON remains the fallback transport for these
-operations when the mod is unavailable. Generic RCON access and filesystem save
-restore are intentionally not routed through the mod.
-falling back to the existing RCON Lua commands when the interface is
-unavailable. The installed package ID is `factorio_assistant`.
+through the mod interface. The installed package ID is `factorio_assistant`.
 
 ```yaml
 automation:
@@ -224,9 +221,9 @@ state-changing tools for the conversation agent.
 
 ## Telemetry
 
-The bridge uses the optional telemetry mod as the primary source for current player and world snapshots when it is enabled. The existing RCON stats command remains the fallback when the mod is disabled, unavailable, or stale, and RCON continues to serve on-demand queries and controls.
+The required telemetry mod is the source for current player and world snapshots. The bridge no longer uses duplicate full-state RCON polling as a fallback; RCON continues to serve lightweight readiness checks, validated mod commands, and generic administrative access.
 
-The bridge still waits until Factorio's RCON service is ready before publishing live telemetry because RCON remains the control and fallback channel. With the telemetry mod enabled, server, world, surface, and player entities use its fresh snapshot without issuing the duplicate full stats command. The `refresh_rate_profile` option controls bridge publishing cadence; choose `slow` for lower-frequency updates and `fast` or `high` when more responsive updates are important.
+The bridge still waits until Factorio's RCON service is ready before publishing live telemetry because RCON carries validated mod commands and readiness checks. Server, world, surface, and player entities use the mod snapshot without issuing duplicate full-state RCON queries. The `refresh_rate_profile` option controls bridge publishing cadence; choose `slow` for lower-frequency updates and `fast` or `high` when more responsive updates are important.
 
 ## Mod Updates
 

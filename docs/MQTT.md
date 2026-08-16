@@ -1,6 +1,8 @@
 # MQTT And Home Assistant
 
-The Python bridge publishes Home Assistant MQTT discovery and runtime state without requiring an additional Factorio mod.
+IMPORTANT: The MQTT bridge has been removed from the add-on and this document is retained for historical reference only. The add-on no longer publishes MQTT discovery or runtime topics — use the native Home Assistant integration and the add-on REST API instead.
+
+The Python bridge used to publish Home Assistant MQTT discovery and runtime state without requiring an additional Factorio mod.
 
 ## Topic Model
 
@@ -24,7 +26,7 @@ Availability topics are:
 
 Player Connected entities remain available when the player is offline and report `false`. Other player telemetry requires bridge, RCON, and player availability.
 
-Every entity exposes a `Source` attribute through its JSON attributes topic. Live snapshot entities report `MOD` when the optional telemetry mod snapshot is fresh and `RCON` when the bridge falls back. Diagnostics and controls may report `RCON diagnostics` or `RCON`.
+Every entity exposes a `Source` attribute through its JSON attributes topic. Live snapshot entities report `MOD`. Diagnostics may report `RCON diagnostics`, while controls use the required mod interface over RCON.
 
 Placed Factorio Assistant Senders create one Home Assistant device per
 reader and one numeric sensor per circuit signal. Discovery configuration,
@@ -68,7 +70,7 @@ the device after its last discovered entity is deleted.
 
 ## Telemetry events
 
-When the optional telemetry mod is enabled, the bridge publishes non-retained
+The required telemetry mod causes the bridge to publish non-retained
 JSON events to:
 
 ```text

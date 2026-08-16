@@ -1,0 +1,535 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Factorio Assistant",
+        "description": "Enter the host and REST API settings for the Factorio Operations Console add-on.",
+        "data": {
+          "host": "Host",
+          "port": "REST port",
+          "api_token": "API token"
+        }
+      }
+    }
+  },
+  "services": {
+    "search_catalog": {
+      "name": "Search catalog",
+      "description": "Search the Factorio prototype catalog.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "query": {
+          "name": "Query",
+          "description": "Text to search for."
+        },
+        "search_type": {
+          "name": "Search type",
+          "description": "Catalog category to search."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of results."
+        },
+        "offset": {
+          "name": "Offset",
+          "description": "Number of matching results to skip."
+        }
+      }
+    },
+    "get_catalog_entry": {
+      "name": "Get catalog entry",
+      "description": "Return one Factorio catalog entry by name and kind.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Prototype name to look up."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "Optional prototype kind filter."
+        },
+        "detail": {
+          "name": "Detail",
+          "description": "Return either full or compact entry data."
+        }
+      }
+    },
+    "get_catalog_production": {
+      "name": "Plan catalog production",
+      "description": "Plan production ratios for requested items using catalog recipes and machines.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "items": {
+          "name": "Items",
+          "description": "Requested production items as JSON objects."
+        },
+        "known_recipes": {
+          "name": "Known recipes",
+          "description": "Optional recipe names to prefer when planning."
+        }
+      }
+    },
+    "list_mods": {
+      "name": "List installed mods",
+      "description": "Return installed Factorio mods and their enabled state.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        }
+      }
+    },
+    "get_status": {
+      "name": "Get server status",
+      "description": "Return current Factorio server, bridge, storage, player, and diagnostic status.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        }
+      }
+    },
+    "get_world": {
+      "name": "Get world snapshot",
+      "description": "Return the current Factorio world, players, surfaces, research, resources, and Signal Monitors.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        }
+      }
+    },
+    "get_research": {
+      "name": "Get research status",
+      "description": "Return current research, queue, researched technologies, and progress.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        }
+      }
+    },
+    "get_events": {
+      "name": "Get telemetry events",
+      "description": "Return recent structured Factorio telemetry events.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of recent events to return."
+        },
+        "event": {
+          "name": "Event type",
+          "description": "Optional event type to filter."
+        }
+      }
+    },
+    "get_player_data": {
+      "name": "Get player data",
+      "description": "Return detailed Factorio player telemetry.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "player": {
+          "name": "Player",
+          "description": "Optional exact Factorio player name."
+        }
+      }
+    },
+    "get_resource_monitor_list": {
+      "name": "Get resource monitor list",
+      "description": "Return pinned resource monitor sites and depletion data.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "surface": {
+          "name": "Surface",
+          "description": "Optional exact Factorio surface name."
+        }
+      }
+    },
+    "inspect_area": {
+      "name": "Inspect area",
+      "description": "Inspect Factorio entities and resources in an area.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "surface": {
+          "name": "Surface",
+          "description": "Factorio surface name."
+        },
+        "center_x": {
+          "name": "Center X",
+          "description": "Area center X coordinate."
+        },
+        "center_y": {
+          "name": "Center Y",
+          "description": "Area center Y coordinate."
+        },
+        "area_size": {
+          "name": "Area size",
+          "description": "Half-width and half-height of the inspected square."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of rows to return."
+        }
+      }
+    },
+    "inspect_map": {
+      "name": "Inspect map",
+      "description": "Inspect Factorio map layers in an area.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "surface": {
+          "name": "Surface",
+          "description": "Factorio surface name."
+        },
+        "center_x": {
+          "name": "Center X",
+          "description": "Area center X coordinate."
+        },
+        "center_y": {
+          "name": "Center Y",
+          "description": "Area center Y coordinate."
+        },
+        "area_size": {
+          "name": "Area size",
+          "description": "Half-width and half-height of the inspected square."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of rows to return."
+        },
+        "include_entities": {
+          "name": "Include entities",
+          "description": "Include entities in map output."
+        },
+        "include_resources": {
+          "name": "Include resources",
+          "description": "Include resources in map output."
+        },
+        "include_tiles": {
+          "name": "Include tiles",
+          "description": "Include tiles in map output."
+        }
+      }
+    },
+    "get_production": {
+      "name": "Get production",
+      "description": "Get Factorio production statistics for selected items.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "surface": {
+          "name": "Surface",
+          "description": "Factorio surface name."
+        },
+        "items": {
+          "name": "Items",
+          "description": "Factorio item names to inspect."
+        }
+      }
+    },
+    "plan_factory": {
+      "name": "Plan factory",
+      "description": "Generate a Factorio factory plan for a goal.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "surface": {
+          "name": "Surface",
+          "description": "Factorio surface name."
+        },
+        "center_x": {
+          "name": "Center X",
+          "description": "Area center X coordinate."
+        },
+        "center_y": {
+          "name": "Center Y",
+          "description": "Area center Y coordinate."
+        },
+        "area_size": {
+          "name": "Area size",
+          "description": "Half-width and half-height of the inspected square."
+        },
+        "goal": {
+          "name": "Goal",
+          "description": "Planning goal for the factory."
+        },
+        "items": {
+          "name": "Items",
+          "description": "Optional item names to include in the plan."
+        }
+      }
+    },
+    "build_factory": {
+      "name": "Build factory",
+      "description": "Validate or place explicit Factorio entities in an area.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "surface": {
+          "name": "Surface",
+          "description": "Factorio surface name."
+        },
+        "entities": {
+          "name": "Entities",
+          "description": "Explicit entity placement objects."
+        },
+        "real": {
+          "name": "Real placement",
+          "description": "When true, place entities in the game world."
+        },
+        "dry_run": {
+          "name": "Dry run",
+          "description": "When true, validate without making changes."
+        }
+      }
+    },
+    "give_items": {
+      "name": "Give items",
+      "description": "Give Factorio items to a player.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "player": {
+          "name": "Player",
+          "description": "Target player name."
+        },
+        "items": {
+          "name": "Items",
+          "description": "Item grant objects containing item name and count."
+        }
+      }
+    },
+    "dispatch_ltn_command": {
+      "name": "Control LTN",
+      "description": "Run a limited Logistic Train Network control action from Home Assistant.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "action": {
+          "name": "Action",
+          "description": "Which LTN helper action to run."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Optional locomotive or prototype name to exclude from the fuel schedule."
+        },
+        "train_id": {
+          "name": "Train id",
+          "description": "The train id to inspect or create a temp stop for."
+        },
+        "old_train_id": {
+          "name": "Old train id",
+          "description": "Train id currently assigned to the delivery."
+        },
+        "new_train_id": {
+          "name": "New train id",
+          "description": "Train id that should receive the delivery."
+        },
+        "schedule_index": {
+          "name": "Schedule index",
+          "description": "Optional schedule index used when creating or reading the next stop."
+        }
+      }
+    },
+    "demolish_area": {
+      "name": "Demolish area",
+      "description": "Inspect or demolish entities in a Factorio area.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "surface": {
+          "name": "Surface",
+          "description": "Factorio surface name."
+        },
+        "center_x": {
+          "name": "Center X",
+          "description": "Area center X coordinate."
+        },
+        "center_y": {
+          "name": "Center Y",
+          "description": "Area center Y coordinate."
+        },
+        "area_size": {
+          "name": "Area size",
+          "description": "Half-width and half-height of the inspected square."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of rows to return."
+        },
+        "names": {
+          "name": "Entity names",
+          "description": "Optional entity prototype names to filter."
+        },
+        "include_resources": {
+          "name": "Include resources",
+          "description": "Include resource entities in demolition filter."
+        },
+        "real": {
+          "name": "Real demolition",
+          "description": "When true, perform demolition in the game world."
+        }
+      }
+    },
+    "set_pause": {
+      "name": "Set pause",
+      "description": "Pause or resume the Factorio game.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "paused": {
+          "name": "Paused",
+          "description": "Set true to pause, false to resume."
+        }
+      }
+    },
+    "set_daylight": {
+      "name": "Set daylight",
+      "description": "Set permanent daylight or night in Factorio.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Enable daylight mode."
+        }
+      }
+    },
+    "set_daytime": {
+      "name": "Set daytime",
+      "description": "Set the Factorio daytime position.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "value": {
+          "name": "Value",
+          "description": "Normalized daytime from 0 to 1."
+        }
+      }
+    },
+    "set_game_speed": {
+      "name": "Set game speed",
+      "description": "Set the Factorio game speed multiplier.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "speed": {
+          "name": "Speed",
+          "description": "Game speed multiplier."
+        }
+      }
+    },
+    "set_map_setting": {
+      "name": "Set map setting",
+      "description": "Enable or disable Factorio pollution or enemy evolution.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "setting": {
+          "name": "Setting",
+          "description": "Map setting to change."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Target enabled state."
+        }
+      }
+    },
+    "set_day_night_cycle": {
+      "name": "Set day night cycle",
+      "description": "Enable or disable the Factorio day-night cycle.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Enable or disable day-night cycling."
+        }
+      }
+    },
+    "save_game": {
+      "name": "Save game",
+      "description": "Save the active Factorio game.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        }
+      }
+    },
+    "send_chat": {
+      "name": "Send chat",
+      "description": "Send a chat message to Factorio players.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        },
+        "message": {
+          "name": "Message",
+          "description": "Chat message text."
+        }
+      }
+    },
+    "clear_revealed_enemies": {
+      "name": "Clear revealed enemies",
+      "description": "Clear revealed enemy units from Factorio.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Factorio instance",
+          "description": "The Factorio Assistant instance to call this action on."
+        }
+      }
+    }
+  }
+}
