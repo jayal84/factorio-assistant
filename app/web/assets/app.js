@@ -6,7 +6,7 @@ const PAGE_GROUPS = [
     items: [
       { key: 'overview', label: 'Overview', subtitle: 'Live health, world state, and alerts.' },
       { key: 'world', label: 'World', subtitle: 'Players, surfaces, and game telemetry.' },
-      { key: 'logistics', label: 'Logistics', subtitle: 'AAI dispatch and LTN controls.' },
+      { key: 'logistics', label: 'Logistics', subtitle: 'LTN controls and train telemetry.' },
         { key: 'resources', label: 'Resources', subtitle: 'Pinned resource sites and extraction telemetry.' },
     ],
   },
@@ -39,14 +39,6 @@ const STATE = {
   },
   ui: {
     logistics: {
-      aaiAction: 'follow_player',
-      aaiUnitKind: 'any',
-      aaiPlayer: '',
-      aaiSurface: '',
-      aaiCenterX: '0',
-      aaiCenterY: '0',
-      aaiAreaSize: '32',
-      aaiStatus: 'Ready',
       ltnAction: 'clear_all_surface_connections',
       ltnName: '',
       ltnTrainId: '0',
@@ -146,10 +138,6 @@ function callModRemote(method, payload) {
     }
     return envelope.result;
   });
-}
-
-function dispatchAaiVehicle(payload) {
-  return callModRemote('aai_dispatch', payload);
 }
 
 function dispatchLtnCommand(payload) {
@@ -367,7 +355,7 @@ function pageSubtitle(page) {
     overview: 'Live status, health, and the most important alerts.',
     world: 'Players, surfaces, and the latest game snapshot.',
     resources: 'Pinned resource sites and extraction telemetry.',
-    logistics: 'AAI dispatch and LTN helpers grouped together.',
+    logistics: 'LTN helpers and train telemetry grouped together.',
     browse: 'Catalog search with grouped results and details.',
     production: 'Build and inspect recipe plans from live catalog data.',
     storage: 'Saves, backups, restore points, and telemetry.',
@@ -504,9 +492,6 @@ function renderResourcesPage() {
 
 function renderLogisticsPage() {
   const world = STATE.snapshot.world || {};
-  const vehicleCounts = normalizeRecord(world.vehicle_counts);
-  const vehicleKinds = normalizeRecord(vehicleCounts.kinds);
-  const vehicleSurfaces = normalizeRecord(vehicleCounts.surfaces);
   const ltn = normalizeRecord(world.ltn);
   const ltnTrains = Array.isArray(ltn.trains) ? ltn.trains : [];
   const ui = STATE.ui.logistics;
@@ -514,39 +499,11 @@ function renderLogisticsPage() {
   return `
     <div class="page-stack">
       ${metricGrid([
-        ['AAI vehicles', formatNumber(vehicleCounts.matched), `${formatNumber(vehicleCounts.total)} total`],
         ['LTN trains', formatNumber(ltn.train_count), `${formatNumber(ltn.scheduled_train_count)} scheduled`],
         ['Manual trains', formatNumber(ltn.manual_train_count), String(ltn.installed ? 'LTN installed' : 'LTN absent')],
-        ['AAI kinds', formatNumber(Object.keys(vehicleKinds).length), `${formatNumber(Object.keys(vehicleSurfaces).length)} surfaces`],
       ])}
 
-      <div class="two-column-grid">
-        ${card('AAI fleet telemetry', 'Live counts', 'Fleet counts are sorted by vehicle family and surface.', `${definitionList([
-          ['All vehicles', formatNumber(vehicleCounts.total)],
-          ['AAI vehicles', formatNumber(vehicleCounts.matched)],
-          ['Miners', formatNumber(vehicleKinds.miner)],
-          ['Haulers', formatNumber(vehicleKinds.hauler)],
-          ['Wardens', formatNumber(vehicleKinds.warden)],
-          ['Chaingunners', formatNumber(vehicleKinds.chaingunner)],
-          ['Flame tanks', formatNumber(vehicleKinds.flame_tank)],
-          ['Ironclads', formatNumber(vehicleKinds.ironclad)],
-          ['Laser tanks', formatNumber(vehicleKinds.laser_tank)],
-        ])}${compactList(Object.entries(vehicleSurfaces).sort(([left], [right]) => left.localeCompare(right)).map(([surface, summary]) => compactRow(surface, formatNumber(normalizeRecord(summary).matched))), 'No surface telemetry reported yet.')}`)}
-        ${card('Dispatch AAI vehicle', ui.aaiStatus, 'Use the current bridge command surface without the old shell layout.', `
-          ${formGrid([
-            selectField('Action', 'logistics', 'aaiAction', ui.aaiAction, ['follow_player', 'go_to_position', 'mine_area']),
-            selectField('Vehicle kind', 'logistics', 'aaiUnitKind', ui.aaiUnitKind, ['any', 'miner', 'hauler', 'warden', 'chaingunner', 'flame_tank', 'flame_tumbler', 'ironclad', 'laser_tank']),
-            textField('Player', 'logistics', 'aaiPlayer', ui.aaiPlayer, 'Player name to follow'),
-            textField('Surface', 'logistics', 'aaiSurface', ui.aaiSurface, 'nauvis'),
-            textField('X', 'logistics', 'aaiCenterX', ui.aaiCenterX, '0', 'number'),
-            textField('Y', 'logistics', 'aaiCenterY', ui.aaiCenterY, '0', 'number'),
-            textField('Area size', 'logistics', 'aaiAreaSize', ui.aaiAreaSize, '32', 'number'),
-          ])}
-          <button class="primary-button" data-action="send-aai">Send vehicle</button>
-        `)}
-      </div>
-
-      <div class="two-column-grid">
+      <div class="single-column-grid">
         ${card('LTN control', ui.ltnStatus, 'Limited helpers are exposed from the bridge and grouped here with the train snapshot.', `
           ${formGrid([
             selectField('Action', 'logistics', 'ltnAction', ui.ltnAction, ['clear_all_surface_connections', 'exclude_from_fuel_schedule', 'get_or_create_next_temp_stop', 'get_next_logistic_stop', 'reassign_delivery']),
@@ -898,9 +855,6 @@ function bindShell() {
     });
   });
 
-  APP.querySelectorAll('[data-action="send-aai"]').forEach((button) => {
-    button.addEventListener('click', () => void runAai());
-  });
   APP.querySelectorAll('[data-action="send-ltn"]').forEach((button) => {
     button.addEventListener('click', () => void runLtn());
   });
@@ -913,28 +867,6 @@ function bindShell() {
   APP.querySelectorAll('[data-action="production-plan"]').forEach((button) => {
     button.addEventListener('click', () => void runProductionPlan());
   });
-}
-
-async function runAai() {
-  const ui = STATE.ui.logistics;
-  ui.aaiStatus = 'Sending...';
-  render();
-  try {
-    const result = await dispatchAaiVehicle({
-      action: ui.aaiAction,
-      unit_kind: ui.aaiUnitKind,
-      player: ui.aaiPlayer,
-      surface: ui.aaiSurface,
-      center_x: Number(ui.aaiCenterX || 0),
-      center_y: Number(ui.aaiCenterY || 0),
-      area_size: Number(ui.aaiAreaSize || 32),
-    });
-    ui.aaiStatus = `OK · ${String(normalizeRecord(result).action || 'dispatched')}`;
-    await refreshSnapshot();
-  } catch (error) {
-    ui.aaiStatus = error instanceof Error ? error.message : 'Dispatch failed';
-    render();
-  }
 }
 
 async function runLtn() {

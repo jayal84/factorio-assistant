@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 - AAI control rollback
+
+- Remove the AAI programmable-vehicle control services pending permission to distribute an integrated or modified AAI implementation.
+- Retain read-only AAI vehicle summary telemetry.
+
 ## 0.3.0 - More Mod Integrations
 
 - Expose dedicated Home Assistant services for AAI vehicle follow, drive, and mining actions.

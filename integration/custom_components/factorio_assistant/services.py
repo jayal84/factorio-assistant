@@ -294,36 +294,6 @@ async def _production(hass: HomeAssistant, coordinator: FactorioAssistantCoordin
 
 
 
-async def _dispatch_aai_vehicle(hass: HomeAssistant, coordinator: FactorioAssistantCoordinator, call: ServiceCall, action: str) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "action": action,
-        "unit_kind": str(call.data.get("unit_kind", "any")),
-    }
-    if call.data.get("player"):
-        payload["player_name"] = str(call.data["player"])
-    if call.data.get("surface"):
-        payload["surface"] = str(call.data["surface"])
-    if call.data.get("center_x") is not None:
-        payload["center_x"] = float(call.data["center_x"])
-    if call.data.get("center_y") is not None:
-        payload["center_y"] = float(call.data["center_y"])
-    if call.data.get("area_size") is not None:
-        payload["area_size"] = float(call.data["area_size"])
-    return await coordinator.async_call_mod_result("aai_dispatch", json.dumps(payload, ensure_ascii=False))
-
-
-async def _follow_aai_vehicle(hass: HomeAssistant, coordinator: FactorioAssistantCoordinator, call: ServiceCall) -> dict[str, Any]:
-    return await _dispatch_aai_vehicle(hass, coordinator, call, "follow_player")
-
-
-async def _drive_aai_vehicle(hass: HomeAssistant, coordinator: FactorioAssistantCoordinator, call: ServiceCall) -> dict[str, Any]:
-    return await _dispatch_aai_vehicle(hass, coordinator, call, "go_to_position")
-
-
-async def _mine_aai_vehicle(hass: HomeAssistant, coordinator: FactorioAssistantCoordinator, call: ServiceCall) -> dict[str, Any]:
-    return await _dispatch_aai_vehicle(hass, coordinator, call, "mine_area")
-
-
 async def _dispatch_ltn_command(hass: HomeAssistant, coordinator: FactorioAssistantCoordinator, call: ServiceCall) -> dict[str, Any]:
     payload: dict[str, Any] = {"action": str(call.data["action"])}
     for key in ("name", "train_id", "old_train_id", "new_train_id", "schedule_index"):
@@ -406,9 +376,6 @@ _SERVICE_HANDLERS.update({
     "build_factory": _build,
     "give_items": _give_items,
     "demolish_area": _demolish,
-    "follow_aai_vehicle": _follow_aai_vehicle,
-    "drive_aai_vehicle": _drive_aai_vehicle,
-    "mine_aai_vehicle": _mine_aai_vehicle,
     "dispatch_ltn_command": _dispatch_ltn_command,
     "set_pause": _control,
     "set_daylight": _control,
@@ -451,9 +418,6 @@ SERVICE_SCHEMAS: dict[str, vol.Schema] = {
     "build_factory": _schema({vol.Optional("surface", default="nauvis"): cv.string, vol.Required("entities"): vol.All(lambda value: _json_list(value, dict), vol.Length(min=1, max=100)), vol.Optional("real", default=False): cv.boolean, vol.Optional("dry_run", default=False): cv.boolean}),
     "give_items": _schema({vol.Required("player"): cv.string, vol.Required("items"): vol.All(lambda value: _json_list(value, dict), vol.Length(min=1, max=50))}),
     "demolish_area": _schema({**_service_schema(area=True, limit=True).schema, vol.Optional("names", default=[]): vol.All(lambda value: _json_list(value, str), vol.Length(max=50)), vol.Optional("include_resources", default=False): cv.boolean, vol.Optional("real", default=False): cv.boolean}),
-    "follow_aai_vehicle": _schema({vol.Required("player"): cv.string, vol.Optional("unit_kind", default="any"): vol.In(["any", "miner", "hauler", "warden", "chaingunner", "flame_tank", "flame_tumbler", "ironclad", "laser_tank"]), vol.Optional("surface", default=""): cv.string}),
-    "drive_aai_vehicle": _schema({vol.Optional("unit_kind", default="any"): vol.In(["any", "miner", "hauler", "warden", "chaingunner", "flame_tank", "flame_tumbler", "ironclad", "laser_tank"]), vol.Optional("surface", default=""): cv.string, vol.Optional("center_x", default=0.0): vol.Coerce(float), vol.Optional("center_y", default=0.0): vol.Coerce(float)}),
-    "mine_aai_vehicle": _schema({vol.Optional("unit_kind", default="miner"): vol.In(["any", "miner", "hauler", "warden", "chaingunner", "flame_tank", "flame_tumbler", "ironclad", "laser_tank"]), vol.Optional("surface", default=""): cv.string, vol.Optional("center_x", default=0.0): vol.Coerce(float), vol.Optional("center_y", default=0.0): vol.Coerce(float), vol.Optional("area_size", default=32.0): vol.Coerce(float)}),
     "dispatch_ltn_command": _schema({vol.Required("action"): vol.In(["clear_all_surface_connections", "exclude_from_fuel_schedule", "get_or_create_next_temp_stop", "get_next_logistic_stop", "reassign_delivery"]), vol.Optional("name", default=""): cv.string, vol.Optional("train_id", default=0): vol.Coerce(int), vol.Optional("old_train_id", default=0): vol.Coerce(int), vol.Optional("new_train_id", default=0): vol.Coerce(int), vol.Optional("schedule_index", default=0): vol.Coerce(int)}),
     "set_pause": _schema({vol.Required("paused"): cv.boolean}),
     "set_daylight": _schema({vol.Required("enabled"): cv.boolean}),

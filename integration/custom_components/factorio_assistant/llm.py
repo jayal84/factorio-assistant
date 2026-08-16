@@ -60,9 +60,6 @@ LLM_SERVICE_SCHEMAS: dict[str, vol.Schema] = {
     "get_player_data": _llm_schema({vol.Optional("player", default=""): str}),
     "get_resource_monitor_list": _llm_schema({vol.Optional("surface", default=""): str}),
     "get_aai_vehicle_summary": _llm_schema({}),
-    "follow_aai_vehicle": _llm_schema({vol.Required("player"): str, vol.Optional("unit_kind", default="any"): str, vol.Optional("surface", default=""): str}),
-    "drive_aai_vehicle": _llm_schema({vol.Optional("unit_kind", default="any"): str, vol.Optional("surface", default=""): str, vol.Optional("center_x", default=0.0): float, vol.Optional("center_y", default=0.0): float}),
-    "mine_aai_vehicle": _llm_schema({vol.Optional("unit_kind", default="miner"): str, vol.Optional("surface", default=""): str, vol.Optional("center_x", default=0.0): float, vol.Optional("center_y", default=0.0): float, vol.Optional("area_size", default=32.0): float}),
     "get_ltn_summary": _llm_schema({}),
     "inspect_area": _llm_schema(
         {
@@ -207,9 +204,6 @@ def _tools() -> list[llm.Tool]:
         ("GetFactorioPlayerData", "Get detailed telemetry for one Factorio player or all players.", "get_player_data"),
         ("GetFactorioResources", "Get pinned Factorio resource monitor sites, amounts, rates, and depletion estimates.", "get_resource_monitor_list"),
         ("GetAAIVehicleSummary", "Get a compact summary of AAI vehicle counts by kind and surface.", "get_aai_vehicle_summary"),
-        ("FollowAAIVehicle", "Send an AAI vehicle to follow a specific player.", "follow_aai_vehicle"),
-        ("DriveAAIVehicle", "Send an AAI vehicle to drive to a target position.", "drive_aai_vehicle"),
-        ("MineAAIVehicle", "Send an AAI mining vehicle to the nearest resource patch in an area.", "mine_aai_vehicle"),
         ("GetLTNSummary", "Get a compact summary of Logistic Train Network counts and surfaces.", "get_ltn_summary"),
         ("SearchFactorioCatalog", "Search the Factorio prototype catalog for items, entities, recipes, or technologies.", "search_catalog"),
         ("GetFactorioCatalogEntry", "Get one Factorio catalog entry by name and kind, with a compact summary or full data.", "get_catalog_entry"),

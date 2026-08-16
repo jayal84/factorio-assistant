@@ -2,6 +2,11 @@
 
 All notable changes to **Factorio Assistant** will be documented here.
 
+## 0.3.1 - 2026-08-16
+
+- Removed the AAI programmable-vehicle control services pending permission to distribute an integrated or modified AAI implementation.
+- Retained read-only AAI vehicle summary telemetry.
+
 ## 0.3.0 - 2026-08-15
 
 - Expose dedicated Home Assistant services for AAI vehicle follow, drive, and mining actions.

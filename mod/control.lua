@@ -1,6 +1,6 @@
 local event_path = "factorio_assistant_events.jsonl"
 local schema_version = 1
-local mod_version = "0.3.0"
+local mod_version = "0.3.1"
 local attack_interval_ticks = 60
 local last_attack_tick = {}
 local death_interval_ticks = 60
@@ -169,40 +169,6 @@ local aai_vehicle_name_patterns = {
 }
 
 local aai_vehicle_kinds = {"miner", "hauler", "warden", "chaingunner", "flame_tank", "flame_tumbler", "ironclad", "laser_tank"}
-
-local function aai_decode_payload(payload)
-  if type(payload) == "table" then
-    return payload
-  end
-  if type(payload) ~= "string" or payload == "" then
-    return nil
-  end
-  local ok, decoded = pcall(function()
-    return helpers.json_to_table(payload)
-  end)
-  if ok and type(decoded) == "table" then
-    return decoded
-  end
-  return nil
-end
-
-local function aai_first_surface()
-  for _, surface in pairs(game.surfaces or {}) do
-    return surface
-  end
-  return nil
-end
-
-local function aai_surface_from_payload(payload, player)
-  local surface_name = tostring(payload.surface or payload.surface_name or "")
-  if surface_name ~= "" and game.surfaces[surface_name] then
-    return game.surfaces[surface_name]
-  end
-  if player and player.surface and player.surface.valid then
-    return player.surface
-  end
-  return aai_first_surface()
-end
 
 local function aai_vehicle_matches_kind(entity_name, unit_kind)
   local patterns = aai_vehicle_name_patterns[unit_kind or "any"] or aai_vehicle_name_patterns.any
@@ -379,69 +345,6 @@ local function aai_vehicle_counts()
   return counts
 end
 
-local function aai_find_vehicle_entity(surface, force, unit_kind, preferred_position)
-  if not surface or not surface.valid then
-    return nil
-  end
-  local best_entity = nil
-  local best_distance = nil
-  local entities = surface.find_entities_filtered({type = {"car", "spider-vehicle"}, force = force})
-  for _, entity in pairs(entities) do
-    if entity.valid and aai_vehicle_matches_kind(entity.name, unit_kind) then
-      local distance = 0
-      if preferred_position then
-        local dx = entity.position.x - preferred_position.x
-        local dy = entity.position.y - preferred_position.y
-        distance = (dx * dx) + (dy * dy)
-      end
-      if not best_entity or distance < best_distance then
-        best_entity = entity
-        best_distance = distance
-      end
-    end
-  end
-  return best_entity
-end
-
-local function aai_remote_unit_lookup(method_name, payload)
-  local interface = remote.interfaces["aai-programmable-vehicles"]
-  if not interface or type(interface[method_name]) ~= "function" then
-    return nil
-  end
-  local ok, result = pcall(function()
-    return remote.call("aai-programmable-vehicles", method_name, payload)
-  end)
-  if ok then
-    return result
-  end
-  return nil
-end
-
-local function aai_unit_from_entity(entity)
-  if not entity or not entity.valid then
-    return nil
-  end
-
-  local unit_number = tonumber(entity.unit_number)
-  if unit_number then
-    local unit = aai_remote_unit_lookup("unit_by_unit_number", unit_number)
-    if unit then
-      return unit
-    end
-  end
-
-  local unit = aai_remote_unit_lookup("unit_find_from_entity", {entity = entity})
-  if unit then
-    return unit
-  end
-
-  return nil
-end
-
-local function ltn_decode_payload(payload)
-  return aai_decode_payload(payload)
-end
-
 local function ltn_find_train_by_id(train_id)
   train_id = tonumber(train_id)
   if not train_id or train_id % 1 ~= 0 then
@@ -523,125 +426,6 @@ local function ltn_command(payload)
       return command_failure(tostring(result))
     end
     return command_success({action = action, reassigned = result == true, old_train_id = old_train_id, new_train_id = new_train_id})
-  end
-
-  return command_failure("unsupported action")
-end
-
-local function aai_dispatch(payload)
-  if not remote.interfaces["aai-programmable-vehicles"] then
-    return command_failure("aai-programmable-vehicles is not installed")
-  end
-  local data = aai_decode_payload(payload)
-  if not data then
-    return command_failure("payload must be a JSON object")
-  end
-
-  local action = string.lower(tostring(data.action or ""))
-  local unit_kind = string.lower(tostring(data.unit_kind or data.vehicle_kind or "any"))
-  local player_name = tostring(data.player_name or data.player or "")
-  local player_index = tonumber(data.player_index or 0)
-  local player = nil
-  if player_name ~= "" then
-    player = game.get_player(player_name)
-  elseif player_index and player_index > 0 then
-    player = game.get_player(player_index)
-  end
-
-  local surface = aai_surface_from_payload(data, player)
-  if not surface then
-    return command_failure("surface_not_found")
-  end
-
-  local force = player and player.force or game.forces.player
-  local preferred_position = nil
-  if data.center_x ~= nil or data.center_y ~= nil then
-    preferred_position = {x = tonumber(data.center_x) or 0, y = tonumber(data.center_y) or 0}
-  elseif player and player.position then
-    preferred_position = {x = player.position.x, y = player.position.y}
-  end
-
-  if action == "follow_player" then
-    if not player then
-      return command_failure("player_not_found")
-    end
-    surface = player.surface and player.surface.valid and player.surface or surface
-    local vehicle = aai_find_vehicle_entity(surface, force, unit_kind, player.position)
-    if not vehicle then
-      return command_failure("vehicle_not_found")
-    end
-    local unit = aai_unit_from_entity(vehicle)
-    if not unit then
-      return command_failure("aai_unit_not_found")
-    end
-    local ok, result = pcall(function()
-      return remote.call("aai-programmable-vehicles", "set_unit_command", {
-        unit = unit,
-        unit_id = unit and unit.unit_id or nil,
-        follow_target_type = "player",
-        follow_target_player = player,
-      })
-    end)
-    if not ok then
-      return command_failure(tostring(result))
-    end
-    return command_success({action = action, vehicle = vehicle.name, unit_id = vehicle.unit_number, player = player.name, surface = surface.name})
-  end
-
-  if action == "go_to_position" or action == "mine_area" then
-    local target_position = preferred_position
-    if not target_position then
-      return command_failure("target position is required")
-    end
-
-    if action == "mine_area" then
-      local area_size = math.max(1, math.floor(tonumber(data.area_size) or 32))
-      local area = {
-        left_top = {x = target_position.x - area_size, y = target_position.y - area_size},
-        right_bottom = {x = target_position.x + area_size, y = target_position.y + area_size},
-      }
-      local chosen_resource = nil
-      local chosen_distance = nil
-      for _, resource in pairs(surface.find_entities_filtered({area = area, type = "resource"})) do
-        if resource.valid then
-          local dx = resource.position.x - target_position.x
-          local dy = resource.position.y - target_position.y
-          local distance = (dx * dx) + (dy * dy)
-          if not chosen_resource or distance < chosen_distance then
-            chosen_resource = resource
-            chosen_distance = distance
-          end
-        end
-      end
-      if chosen_resource then
-        target_position = {x = chosen_resource.position.x, y = chosen_resource.position.y}
-      end
-    end
-
-    local vehicle = aai_find_vehicle_entity(surface, force, unit_kind, target_position)
-    if not vehicle then
-      return command_failure("vehicle_not_found")
-    end
-    local unit = aai_unit_from_entity(vehicle)
-    if not unit then
-      return command_failure("aai_unit_not_found")
-    end
-    local command = {
-      unit = unit,
-      unit_id = unit and unit.unit_id or nil,
-    }
-    if action == "mine_area" or string.find(vehicle.name, "^vehicle%-miner") then
-      command.target_position_direct = target_position
-    else
-      command.target_position = target_position
-    end
-    local ok, result = pcall(function()
-      return remote.call("aai-programmable-vehicles", "set_unit_command", command)
-    end)
-    if not ok then
-      return command_failure(tostring(result))
-    end
-    return command_success({action = action, vehicle = vehicle.name, unit_id = vehicle.unit_number, surface = surface.name, target = target_position})
   end
 
   return command_failure("unsupported action")
@@ -780,10 +564,6 @@ remote.add_interface("factorio_assistant", {
     end
     game.print(message)
     return command_success(message)
-  end,
-
-  aai_dispatch = function(payload)
-    return aai_dispatch(payload)
   end,
 
   ltn_command = function(payload)

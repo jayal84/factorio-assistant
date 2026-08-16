@@ -17,7 +17,7 @@ The mod is required. The add-on does not fall back to duplicate RCON polling whe
 
 - Factorio 2.0
 - Space Age supported when installed on the server
-- Mod version: 0.3.0
+- Mod version: 0.3.1
 
 Resource Monitor is included in this mod. Install the same
 `factorio_assistant_<version>.zip` on the server and every multiplayer client;

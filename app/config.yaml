@@ -1,7 +1,7 @@
 name: "Factorio Assistant"
 description: "Factorio Space Age server assistant for Home Assistant with MQTT telemetry, RCON controls, and automated mod updates."
 url: "https://github.com/jayal84/factorio-assistant"
-version: "0.3.0"
+version: "0.3.1"
 slug: "factorio_assistant"
 arch:
   - amd64

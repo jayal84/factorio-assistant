@@ -1,7 +1,7 @@
 {
   "domain": "factorio_assistant",
   "name": "Factorio Assistant",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "documentation": "https://github.com/jayal84/factorio-assistant",
   "issue_tracker": "https://github.com/jayal84/factorio-assistant/issues",
   "codeowners": ["@jayal84"],
