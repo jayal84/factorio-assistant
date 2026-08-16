@@ -79,11 +79,8 @@ function getPageFromHash() {
 }
 
 function isKnownPage(value) {
-  return ['overview', 'world', 'logistics', 'browse', 'production', 'storage', 'system'].includes(value);
+  return ['overview', 'world', 'resources', 'logistics', 'browse', 'production', 'storage', 'system'].includes(value);
 }
-  function isKnownPage(value) {
-    return ['overview', 'world', 'resources', 'logistics', 'browse', 'production', 'storage', 'system'].includes(value);
-  }
 
 function apiUrl(path) {
   return new URL(path.replace(/^\//, ''), document.baseURI).toString();

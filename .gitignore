@@ -10,6 +10,7 @@ __pycache__/
 
 # Local workspace and maintainer files
 DEVNOTES.md
+DEVNOTES_MQTT_REFERENCE.md
 factorio_server.code-workspace
 reference/
 

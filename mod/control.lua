@@ -162,12 +162,13 @@ local aai_vehicle_name_patterns = {
   hauler = {"^vehicle%-hauler"},
   warden = {"^vehicle%-warden"},
   chaingunner = {"^vehicle%-chaingunner"},
-  flame_tank = {"^vehicle%-flame%-tank", "^vehicle%-flame%-tumbler"},
+  flame_tank = {"^vehicle%-flame%-tank"},
+  flame_tumbler = {"^vehicle%-flame%-tumbler"},
   ironclad = {"^vehicle%-ironclad"},
   laser_tank = {"^vehicle%-laser%-tank"},
 }
 
-local aai_vehicle_kinds = {"miner", "hauler", "warden", "chaingunner", "flame_tank", "ironclad", "laser_tank"}
+local aai_vehicle_kinds = {"miner", "hauler", "warden", "chaingunner", "flame_tank", "flame_tumbler", "ironclad", "laser_tank"}
 
 local function aai_decode_payload(payload)
   if type(payload) == "table" then
@@ -402,16 +403,38 @@ local function aai_find_vehicle_entity(surface, force, unit_kind, preferred_posi
   return best_entity
 end
 
+local function aai_remote_unit_lookup(method_name, payload)
+  local interface = remote.interfaces["aai-programmable-vehicles"]
+  if not interface or type(interface[method_name]) ~= "function" then
+    return nil
+  end
+  local ok, result = pcall(function()
+    return remote.call("aai-programmable-vehicles", method_name, payload)
+  end)
+  if ok then
+    return result
+  end
+  return nil
+end
+
 local function aai_unit_from_entity(entity)
   if not entity or not entity.valid then
     return nil
   end
-  local ok, unit = pcall(function()
-    return remote.call("aai-programmable-vehicles", "get_unit_by_entity", {entity = entity})
-  end)
-  if ok then
+
+  local unit_number = tonumber(entity.unit_number)
+  if unit_number then
+    local unit = aai_remote_unit_lookup("unit_by_unit_number", unit_number)
+    if unit then
+      return unit
+    end
+  end
+
+  local unit = aai_remote_unit_lookup("unit_find_from_entity", {entity = entity})
+  if unit then
     return unit
   end
+
   return nil
 end
 
@@ -554,6 +577,7 @@ local function aai_dispatch(payload)
     local ok, result = pcall(function()
       return remote.call("aai-programmable-vehicles", "set_unit_command", {
         unit = unit,
+        unit_id = unit and unit.unit_id or nil,
         follow_target_type = "player",
         follow_target_player = player,
       })
@@ -602,7 +626,10 @@ local function aai_dispatch(payload)
     if not unit then
       return command_failure("aai_unit_not_found")
     end
-    local command = {unit = unit}
+    local command = {
+      unit = unit,
+      unit_id = unit and unit.unit_id or nil,
+    }
     if action == "mine_area" or string.find(vehicle.name, "^vehicle%-miner") then
       command.target_position_direct = target_position
     else
